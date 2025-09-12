@@ -2,41 +2,47 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Chat Rooms</title>
+<title>Chat</title>
 <link rel="stylesheet" href="style.css">
-<script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
 <div class="container">
-<h2>Welcome <span id="username"></span></h2>
-<button onclick="logout()">Logout</button>
+  <header>
+    <h2>Welcome <span id="username"></span></h2>
+    <button onclick="logout()">Logout</button>
+  </header>
 
-<h3>Create Room</h3>
-<input id="roomName" placeholder="Room Name">
-<input id="roomPassword" placeholder="Room Password">
-<button onclick="createRoom()">Create</button>
+  <section class="room-creation">
+    <input id="roomName" placeholder="Room Name">
+    <input id="roomPassword" placeholder="Room Password">
+    <button onclick="createRoom()">Create Room</button>
+  </section>
 
-<h3>Available Rooms</h3>
-<ul id="roomsList"></ul>
+  <section class="rooms">
+    <h3>Available Rooms</h3>
+    <ul id="roomsList"></ul>
+  </section>
 
-<h3>Chat</h3>
-<div id="chatBox"></div>
-<input id="msgInput" placeholder="Type a message">
-<button onclick="sendMessage()">Send</button>
+  <section class="chat">
+    <div id="chatBox" class="chat-box"></div>
+    <input id="msgInput" placeholder="Type a message">
+    <button onclick="sendMessage()">Send</button>
+  </section>
 </div>
 
+<script src="/socket.io/socket.io.js"></script>
 <script>
 let socket = io();
 let currentRoom = "";
 let username = "";
 
-(async function init(){
+async function init(){
   const res = await fetch("/rooms");
-  if(res.status === 401) return window.location="/login.html";
-  username = prompt("Set display name") || "Anonymous";
+  if(res.status===401) return window.location="/login.html";
+  username = prompt("Enter display name")||"Anonymous";
   document.getElementById("username").innerText=username;
   loadRooms();
-})();
+}
 
 async function loadRooms(){
   const res = await fetch("/rooms");
@@ -45,7 +51,7 @@ async function loadRooms(){
   list.innerHTML="";
   rooms.forEach(r=>{
     const li = document.createElement("li");
-    li.textContent = r.name + (r.hasPassword ? " 🔒" : "");
+    li.textContent = r.name + (r.hasPassword?" 🔒":"");
     li.onclick=()=>{
       const pass = r.hasPassword ? prompt("Enter room password") : "";
       joinRoom(r.name, pass||"");
@@ -67,18 +73,40 @@ async function createRoom(){
 }
 
 function joinRoom(room, pass){
-  currentRoom = room;
-  socket.emit("join-room",{roomName:room, roomPassword:pass, username});
+  currentRoom=room;
+  socket.emit("join-room",{roomName:room,roomPassword:pass,username});
 }
 
 socket.on("history", messages=>{
-  const box = document.getElementById("chatBox");
+  const box=document.getElementById("chatBox");
   box.innerHTML="";
   messages.forEach(m=>{
-    const div = document.createElement("div");
-    div.textContent = `${m.user}: ${m.text}`;
+    const div=document.createElement("div");
+    div.textContent=`${m.user}: ${m.text}`;
     box.appendChild(div);
   });
 });
 
 socket.on("message", m=>{
+  const box=document.getElementById("chatBox");
+  const div=document.createElement("div");
+  div.textContent=`${m.user}: ${m.text}`;
+  box.appendChild(div);
+});
+
+function sendMessage(){
+  const msg=document.getElementById("msgInput").value;
+  if(!currentRoom) return alert("Join a room first");
+  socket.emit("message",{roomName:currentRoom,user:username,text:msg});
+  document.getElementById("msgInput").value="";
+}
+
+async function logout(){
+  await fetch("/logout",{method:"POST"});
+  window.location="/login.html";
+}
+
+init();
+</script>
+</body>
+</html>
