@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Chat Rooms</title>
+<link rel="stylesheet" href="style.css">
+<script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+<h2>Welcome <span id="username"></span></h2>
+<button onclick="logout()">Logout</button>
+
+<h3>Create Room</h3>
+<input id="roomName" placeholder="Room Name">
+<input id="roomPassword" placeholder="Room Password">
+<button onclick="createRoom()">Create</button>
+
+<h3>Available Rooms</h3>
+<ul id="roomsList"></ul>
+
+<h3>Chat</h3>
+<div id="chatBox" style="border:1px solid black; height:200px; overflow-y:scroll;"></div>
+<input id="msgInput" placeholder="Type a message">
+<button onclick="sendMessage()">Send</button>
+
+<script>
+let socket = io();
+let currentRoom = "";
+let username = "Anonymous";
+
+// fetch username from session
+username = prompt("Enter your username for display (same as login)");
+document.getElementById("username").innerText = username;
+
+// Fetch rooms
+async function loadRooms(){
+  const res = await fetch("/rooms");
+  const rooms = await res.json();
+  const list = document.getElementById("roomsList");
+  list.innerHTML="";
+  Object.keys(rooms).forEach(r=>{
+    const li = document.createElement("li");
+    li.textContent = r;
+    li.style.cursor="pointer";
+    li.onclick=()=>{
+      const pass = prompt("Enter room password (if any)");
+      joinRoom(r, pass||"");
+    }
+    list.appendChild(li);
+  });
+}
+loadRooms();
+
+// Create Room
+async function createRoom(){
+  const roomName = document.getElementById("roomName").value;
+  const roomPassword = document.getElementById("roomPassword").value;
+  const res = await fetch("/create-room",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({roomName,roomPassword})
+  });
+  const data = await res.json();
+  if(data.ok){
+    alert("Room created");
+    loadRooms();
+  } else alert("Error");
+}
+
+// Join Room
+function joinRoom(room, pass){
+  currentRoom = room;
+  socket.emit("join-room",{roomName:room,roomPassword:pass});
+}
+
+// Chat history
+socket.on("history", messages=>{
+  const box = document.getElementById("chatBox");
+  box.innerHTML="";
+  messages.forEach(m=>{
+    const div = document.createElement("div");
+    div.textContent = `${m.user}: ${m.text}`;
+    box.appendChild(div);
+  });
+});
+
+// Receive new messages
+socket.on("message", m=>{
+  const box = document.getElementById("chatBox");
+  const div = document.createElement("div");
+  div.textContent = `${m.user}: ${m.text}`;
+  box.appendChild(div);
+});
+
+// Send message
+function sendMessage(){
+  const msg = document.getElementById("msgInput").value;
+  if(!currentRoom) return alert("Join a room first");
+  socket.emit("message",{roomName:currentRoom,user:username,text:msg});
+  document.getElementById("msgInput").value="";
+}
+
+// Logout
+async function logout(){
+  await fetch("/logout",{method:"POST"});
+  window.location="/login.html";
+}
+</script>
+</body>
+</html>
