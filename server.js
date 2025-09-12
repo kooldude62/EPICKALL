@@ -1,104 +1,153 @@
 import express from "express";
 import session from "express-session";
-import bcrypt from "bcryptjs";
-import fs from "fs";
+import { Low } from "lowdb";
+import { JSONFile } from "lowdb/node";
+import multer from "multer";
 import path from "path";
 import { fileURLToPath } from "url";
-import bodyParser from "body-parser";
+import bcrypt from "bcryptjs";
+import { Server } from "socket.io";
+import http from "http";
+import { v4 as uuidv4 } from "uuid";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+const server = http.createServer(app);
+const io = new Server(server);
 
+app.use(express.static(path.join(__dirname, "public")));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Session
 app.use(session({
-  secret: "secret",
-  resave: false,
-  saveUninitialized: true
+    secret: "supersecretkey",
+    resave: false,
+    saveUninitialized: false
 }));
 
-// Serve static files
-app.use(express.static(path.join(__dirname, "public")));
-const uploadsDir = path.join(__dirname, "public", "uploads");
-if(!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
+// Database setup
+const file = path.join(__dirname, "db.json");
+const adapter = new JSONFile(file);
+const db = new Low(adapter);
 
-// Accounts JSON
-const accountsFile = path.join(__dirname, "accounts.json");
-if(!fs.existsSync(accountsFile)) fs.writeFileSync(accountsFile, "[]");
+await db.read();
+db.data = db.data || { users: [], rooms: {}, messages: {} };
+await db.write();
 
-function getAccounts(){ return JSON.parse(fs.readFileSync(accountsFile,"utf-8")); }
-function saveAccounts(data){ fs.writeFileSync(accountsFile, JSON.stringify(data,null,2)); }
+// Multer for avatar upload
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, path.join(__dirname, "public/avatars")),
+    filename: (req, file, cb) => cb(null, `${req.session.user}_${Date.now()}${path.extname(file.originalname)}`)
+});
+const upload = multer({ storage });
 
-// Middleware to require login
-function requireLogin(req,res,next){
-  if(req.session.user) next();
-  else res.redirect("/login.html");
-}
+// --- Routes ---
 
-// --- Signup ---
-app.post("/signup", async (req,res)=>{
-  const { username, password } = req.body;
-  if(!username || !password) return res.status(400).send("Missing fields");
-  const accounts = getAccounts();
-  if(accounts.find(a=>a.username===username)) return res.status(400).send("Username taken");
+// Signup
+app.post("/signup", async (req, res) => {
+    const { username, password } = req.body;
+    if (!username || !password) return res.status(400).send("Missing fields");
 
-  const hash = await bcrypt.hash(password, 10);
-  accounts.push({ username, password: hash, pfp: "" });
-  saveAccounts(accounts);
-  req.session.user = username;
-  res.send("OK");
+    const userExists = db.data.users.find(u => u.username === username);
+    if (userExists) return res.status(400).send("Username exists");
+
+    const hash = await bcrypt.hash(password, 10);
+    db.data.users.push({ username, password: hash, avatar: "/avatars/default.png" });
+    await db.write();
+
+    req.session.user = username;
+    res.send({ success: true });
 });
 
-// --- Login ---
-app.post("/login", async (req,res)=>{
-  const { username, password } = req.body;
-  if(!username || !password) return res.status(400).send("Missing fields");
-  const accounts = getAccounts();
-  const user = accounts.find(a=>a.username===username);
-  if(!user) return res.status(400).send("Invalid username");
-  const match = await bcrypt.compare(password, user.password);
-  if(!match) return res.status(400).send("Invalid password");
-  req.session.user = username;
-  res.send("OK");
+// Login
+app.post("/login", async (req, res) => {
+    const { username, password } = req.body;
+    const user = db.data.users.find(u => u.username === username);
+    if (!user) return res.status(400).send("Invalid credentials");
+
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) return res.status(400).send("Invalid credentials");
+
+    req.session.user = username;
+    res.send({ success: true });
 });
 
-// --- Logout ---
-app.post("/logout", (req,res)=>{
-  req.session.destroy(()=>{});
-  res.send("OK");
+// Logout
+app.post("/logout", (req, res) => {
+    req.session.destroy(() => {});
+    res.send({ success: true });
 });
 
-// --- Account info ---
-app.get("/account", requireLogin, (req,res)=>{
-  const user = getAccounts().find(a=>a.username===req.session.user);
-  res.json({ username: user.username, pfp: user.pfp });
+// Get account info
+app.get("/account", (req, res) => {
+    const user = db.data.users.find(u => u.username === req.session.user);
+    if (!user) return res.status(403).send("Not logged in");
+    res.send({ username: user.username, avatar: user.avatar });
 });
 
-// --- Update PFP ---
-app.post("/update-pfp", requireLogin, (req,res)=>{
-  const { filename, base64 } = req.body; // Accept base64 string from client
-  if(!filename || !base64) return res.status(400).send("Missing PFP");
-
-  const filePath = path.join(uploadsDir, filename);
-  const data = base64.replace(/^data:image\/\w+;base64,/, "");
-  const buffer = Buffer.from(data, "base64");
-  fs.writeFileSync(filePath, buffer);
-
-  const accounts = getAccounts();
-  const user = accounts.find(a=>a.username===req.session.user);
-  user.pfp = "/uploads/" + filename;
-  saveAccounts(accounts);
-  res.send("OK");
+// Update avatar
+app.post("/avatar", upload.single("avatar"), async (req, res) => {
+    const user = db.data.users.find(u => u.username === req.session.user);
+    if (!user) return res.status(403).send("Not logged in");
+    user.avatar = "/avatars/" + req.file.filename;
+    await db.write();
+    res.send({ success: true, avatar: user.avatar });
 });
 
-// --- Protected example route ---
-app.get("/rooms", requireLogin, (req,res)=>{
-  // Just return empty array for now
-  res.json([]);
+// Rooms
+app.get("/rooms", (req, res) => {
+    res.send(Object.keys(db.data.rooms));
+});
+
+app.post("/rooms", async (req, res) => {
+    const { room } = req.body;
+    if (!room) return res.status(400).send("Room name required");
+    if (!db.data.rooms[room]) {
+        db.data.rooms[room] = { creator: req.session.user };
+        db.data.messages[room] = [];
+        await db.write();
+    }
+    res.send({ success: true });
+});
+
+// --- Socket.io ---
+io.on("connection", (socket) => {
+    let currentRoom = null;
+    let username = null;
+
+    socket.on("joinRoom", async ({ room, user }) => {
+        username = user;
+        currentRoom = room;
+        socket.join(room);
+
+        if (!db.data.messages[room]) db.data.messages[room] = [];
+        socket.emit("history", db.data.messages[room]);
+    });
+
+    socket.on("message", async (msg) => {
+        if (!currentRoom) return;
+        const message = { id: uuidv4(), user: username, text: msg, timestamp: Date.now() };
+        db.data.messages[currentRoom].push(message);
+        await db.write();
+        io.to(currentRoom).emit("message", message);
+    });
+
+    socket.on("deleteMessage", async (msgId) => {
+        if (!currentRoom) return;
+        const message = db.data.messages[currentRoom].find(m => m.id === msgId);
+        const roomCreator = db.data.rooms[currentRoom].creator;
+        if (!message) return;
+
+        if (message.user === username || roomCreator === username) {
+            db.data.messages[currentRoom] = db.data.messages[currentRoom].filter(m => m.id !== msgId);
+            await db.write();
+            io.to(currentRoom).emit("deleteMessage", msgId);
+        }
+    });
 });
 
 // Start server
-const PORT = 3000;
-app.listen(PORT, ()=>console.log(`Server running on http://localhost:${PORT}`));
+server.listen(process.env.PORT || 3000, () => console.log("Server running"));
