@@ -200,16 +200,24 @@ io.on("connection",(socket)=>{
     }
   });
 
-  socket.on("dmMessage",({to,from,message})=>{
+socket.on("dmMessage",({to,from,message})=>{
     if(!users[to]||!users[from]) return;
     if(!users[to].friends.includes(from)) return;
-    const key = [to,from].sort().join("_");
+
+    const key=[to,from].sort().join("_");
     if(!dms[key]) dms[key]=[];
-    const msg = { id: generateId(), sender: from, message, time:new Date() };
+
+    const msg={id: generateId(), sender: from, message, time:new Date()};
     dms[key].push(msg);
+
+    // Send to recipient and sender
     io.to(to).emit("dmMessage",msg);
     io.to(from).emit("dmMessage",msg);
-  });
+
+    // Send notification to recipient if they are not currently in DM
+    io.to(to).emit("dmNotification",{from});
+});
+
 
   socket.on("adminJoinRoom",(roomId)=>{
     socket.join(roomId);
