@@ -1,144 +1,185 @@
-const express = require("express");
-const http = require("http");
-const path = require("path");
-const fs = require("fs");
-const bcrypt = require("bcryptjs");
-const session = require("express-session");
-const cookieParser = require("cookie-parser");
-const multer = require("multer");
-const { v4: uuidv4 } = require("uuid");
-const { Server } = require("socket.io");
+import express from "express";
+import http from "http";
+import { Server } from "socket.io";
+import path from "path";
+import { fileURLToPath } from "url";
+import bcrypt from "bcryptjs";
+import session from "express-session";
+import cookieParser from "cookie-parser";
+import { nanoid } from "nanoid";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-const PORT = 3000;
-
-// --- Middleware ---
+app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(session({
-  secret: "super-secret-key",
+  secret: "supersecret",
   resave: false,
-  saveUninitialized: false,
+  saveUninitialized: false
 }));
-app.use(express.static(path.join(__dirname, "public")));
 
-// --- Multer Setup (for avatars) ---
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "public/uploads/"),
-  filename: (req, file, cb) => cb(null, Date.now() + "-" + file.originalname)
-});
-const upload = multer({ storage });
+// Database (in-memory)
+let users = {};   // { username: { password, pfp, friends:[], requests:[] } }
+let rooms = {};   // { name: { password, inviteOnly, inviteId, messages:[] } }
+let dms = {};     // { user1:user2: [ {from,to,text} ] }
 
-// --- Database File ---
-const USERS_FILE = "./users.json";
-if (!fs.existsSync(USERS_FILE)) fs.writeFileSync(USERS_FILE, JSON.stringify([]));
+// Middleware
+function requireLogin(req,res,next){
+  if(!req.session.user) return res.status(401).send("Unauthorized");
+  next();
+}
 
-// --- Helpers ---
-const loadUsers = () => JSON.parse(fs.readFileSync(USERS_FILE));
-const saveUsers = (users) => fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
-
-// --- Routes ---
-app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
-app.get("/login", (req, res) => res.sendFile(path.join(__dirname, "public/login.html")));
-app.get("/signup", (req, res) => res.sendFile(path.join(__dirname, "public/signup.html")));
-app.get("/settings", (req, res) => res.sendFile(path.join(__dirname, "public/settings.html")));
-
-// Signup
-app.post("/signup", upload.single("avatar"), (req, res) => {
+// Auth
+app.post("/signup", async (req,res)=>{
   const { username, password } = req.body;
-  const users = loadUsers();
-
-  if (users.find(u => u.username === username)) {
-    return res.status(400).json({ error: "Username already exists" });
-  }
-
-  const hashedPassword = bcrypt.hashSync(password, 10);
-  const newUser = {
-    id: uuidv4(),
-    username,
-    password: hashedPassword,
-    avatar: req.file ? `/uploads/${req.file.filename}` : "/default-avatar.png"
-  };
-
-  users.push(newUser);
-  saveUsers(users);
-
-  req.session.user = newUser;
-  res.json({ success: true });
+  if(!username || !password || users[username]) return res.send("Invalid signup.");
+  const hashed = await bcrypt.hash(password,10);
+  users[username] = { password: hashed, pfp: "/default.png", friends:[], requests:[] };
+  req.session.user = username;
+  res.redirect("/");
 });
 
-// Login
-app.post("/login", (req, res) => {
+app.post("/login", async (req,res)=>{
   const { username, password } = req.body;
-  const users = loadUsers();
+  if(!username || !password || !users[username]) return res.send("Invalid login.");
+  const valid = await bcrypt.compare(password, users[username].password);
+  if(!valid) return res.send("Invalid login.");
+  req.session.user = username;
+  res.redirect("/");
+});
 
-  const user = users.find(u => u.username === username);
-  if (!user || !bcrypt.compareSync(password, user.password)) {
-    return res.status(400).json({ error: "Invalid credentials" });
-  }
+app.post("/logout",(req,res)=>{
+  req.session.destroy(()=>res.redirect("/login.html"));
+});
 
-  req.session.user = user;
-  res.json({ success: true });
+app.get("/me", requireLogin, (req,res)=>{
+  const u = req.session.user;
+  res.json({ username: u, pfp: users[u].pfp || "/default.png" });
 });
 
 // Account update
-app.post("/update-account", upload.single("avatar"), (req, res) => {
-  if (!req.session.user) return res.status(401).json({ error: "Not logged in" });
-
-  const users = loadUsers();
-  const user = users.find(u => u.id === req.session.user.id);
-
-  if (req.body.password) {
-    user.password = bcrypt.hashSync(req.body.password, 10);
+app.post("/updateAccount", requireLogin, (req,res)=>{
+  const { username, pfp } = req.body;
+  const current = req.session.user;
+  if(username && !users[username]){
+    users[username] = users[current];
+    delete users[current];
+    req.session.user = username;
   }
-  if (req.file) {
-    user.avatar = `/uploads/${req.file.filename}`;
-  }
-
-  saveUsers(users);
-  req.session.user = user;
-  res.json({ success: true });
+  if(pfp) users[req.session.user].pfp = pfp;
+  res.redirect("/");
 });
 
-// --- Socket.IO ---
-let rooms = {};
+// Friend system
+app.get("/users", requireLogin,(req,res)=>{
+  const q = (req.query.q||"").toLowerCase();
+  const arr = Object.keys(users)
+    .filter(u=>u.toLowerCase().includes(q) && u!==req.session.user)
+    .map(u=>({username:u, pfp: users[u].pfp||"/default.png"}));
+  res.json(arr);
+});
 
-io.on("connection", (socket) => {
-  socket.on("joinRoom", ({ roomId, username }) => {
-    socket.join(roomId);
-    socket.username = username;
-    socket.roomId = roomId;
+app.post("/friend/request", requireLogin,(req,res)=>{
+  const { to } = req.body;
+  const from = req.session.user;
+  if(!users[to]) return res.sendStatus(400);
+  users[to].requests.push({from,id:nanoid(6)});
+  res.json({ok:true});
+});
 
-    socket.to(roomId).emit("chatMessage", {
-      user: "System",
-      text: `${username} joined the room.`,
-      avatar: "/default-avatar.png"
-    });
+app.get("/friend/requests", requireLogin,(req,res)=>{
+  res.json(users[req.session.user].requests||[]);
+});
+
+app.post("/friend/respond", requireLogin,(req,res)=>{
+  const { id, accept } = req.body;
+  const me = req.session.user;
+  const reqs = users[me].requests;
+  const fr = reqs.find(r=>r.id===id);
+  if(!fr) return res.sendStatus(400);
+  users[me].requests = reqs.filter(r=>r.id!==id);
+  if(accept){
+    users[me].friends.push(fr.from);
+    users[fr.from].friends.push(me);
+  }
+  res.json({ok:true});
+});
+
+app.get("/dms", requireLogin,(req,res)=>{
+  const me = req.session.user;
+  const fs = users[me].friends||[];
+  res.json(fs.map(u=>({username:u,pfp:users[u].pfp||"/default.png"})));
+});
+
+// Rooms
+app.get("/rooms",(req,res)=>{
+  res.json(Object.values(rooms).filter(r=>!r.inviteOnly).map(r=>({
+    name:r.name, private:!!r.password
+  })));
+});
+
+app.get("/rooms/:name",(req,res)=>{
+  const r = rooms[req.params.name];
+  if(!r) return res.json({});
+  res.json({ private: !!r.password });
+});
+
+app.post("/rooms/create", requireLogin,(req,res)=>{
+  const {name,password,inviteOnly} = req.body;
+  if(!name || rooms[name]) return res.json({ok:false,error:"Invalid"});
+  const inviteId = inviteOnly ? nanoid(8) : null;
+  rooms[name] = { name, password: password||null, inviteOnly, inviteId, messages:[] };
+  res.json({ok:true,inviteId});
+});
+
+app.get("/rooms/invite/:id",(req,res)=>{
+  const r = Object.values(rooms).find(r=>r.inviteId===req.params.id);
+  if(!r) return res.status(404).send("Invite not found");
+  res.redirect("/?join=" + encodeURIComponent(r.name));
+});
+
+// Sockets
+io.on("connection",(socket)=>{
+  let currentUser = null;
+
+  socket.on("identify",(u)=>{ currentUser=u; });
+
+  socket.on("joinRoomSocket",({room,password})=>{
+    const r = rooms[room];
+    if(!r) return socket.emit("errorMsg","Room not found");
+    if(r.password && r.password!==password) return socket.emit("errorMsg","Wrong password");
+    socket.join(room);
+    socket.emit("roomHistory",{ room, history:r.messages });
   });
 
-  socket.on("chatMessage", (msg) => {
-    if (!socket.roomId) return;
-    io.to(socket.roomId).emit("chatMessage", {
-      user: socket.username,
-      text: msg,
-      avatar: "/default-avatar.png"
-    });
+  socket.on("sendRoomMessage",({room,text})=>{
+    if(!room||!text) return;
+    const msg={user:currentUser,text};
+    rooms[room].messages.push(msg);
+    io.to(room).emit("roomMessage",msg);
   });
 
-  socket.on("disconnect", () => {
-    if (socket.roomId) {
-      socket.to(socket.roomId).emit("chatMessage", {
-        user: "System",
-        text: `${socket.username} left the room.`,
-        avatar: "/default-avatar.png"
-      });
-    }
+  socket.on("startDM",({withUser})=>{
+    const key=[currentUser,withUser].sort().join(":");
+    if(!dms[key]) dms[key]=[];
+    socket.emit("dmHistory",{withUser,history:dms[key]});
+  });
+
+  socket.on("sendDM",({to,text})=>{
+    const key=[currentUser,to].sort().join(":");
+    const msg={from:currentUser,to,text};
+    if(!dms[key]) dms[key]=[];
+    dms[key].push(msg);
+    io.emit("dmMessage",msg);
   });
 });
 
-// --- Start Server ---
-server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+const PORT=process.env.PORT||3000;
+server.listen(PORT,()=>console.log("Server running http://localhost:"+PORT));
