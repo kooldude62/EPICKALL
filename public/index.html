@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>EpickChat</title>
+  <title>Chat App</title>
+  <script src="/socket.io/socket.io.js"></script>
   <style>
-    /* Reset & Base */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: Arial, sans-serif;
@@ -14,7 +14,6 @@
       height: 100vh;
       overflow: hidden;
     }
-
     /* Sidebar */
     .sidebar {
       width: 250px;
@@ -23,15 +22,8 @@
       display: flex;
       flex-direction: column;
       border-right: 1px solid #3a3c40;
-      transition: all 0.3s ease;
     }
-
-    .sidebar h2 {
-      margin-bottom: 20px;
-      font-size: 18px;
-      color: #f2f2f2;
-    }
-
+    .sidebar h2 { margin-bottom: 20px; font-size: 18px; }
     .sidebar button {
       background: #5865f2;
       color: white;
@@ -43,151 +35,162 @@
       font-weight: bold;
       transition: background 0.2s ease;
     }
-
-    .sidebar button:hover {
-      background: #4752c4;
-    }
-
-    /* Main Content */
-    .main {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-    }
-
-    /* Header */
+    .sidebar button:hover { background: #4752c4; }
+    /* Main */
+    .main { flex: 1; display: flex; flex-direction: column; }
     .header {
       padding: 15px;
       background: #1e1f22;
       border-bottom: 1px solid #3a3c40;
       font-size: 16px;
       font-weight: bold;
-      color: #f2f2f2;
     }
-
-    /* Chat Area */
-    .chat {
-      flex: 1;
-      padding: 20px;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
+    /* Chat */
+    .chat { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
     .message {
       background: #3a3c40;
       padding: 10px 15px;
       border-radius: 8px;
       max-width: 70%;
       word-wrap: break-word;
-      transition: transform 0.2s ease, opacity 0.2s ease;
     }
-
-    .message.self {
-      align-self: flex-end;
-      background: #5865f2;
-      color: white;
-    }
-
-    /* Message Input */
+    .message.self { align-self: flex-end; background: #5865f2; color: white; }
+    /* Input */
     .input-area {
       display: flex;
       padding: 15px;
       background: #1e1f22;
       border-top: 1px solid #3a3c40;
     }
-
     .input-area input {
-      flex: 1;
-      padding: 10px;
-      border: none;
-      border-radius: 6px;
-      background: #3a3c40;
-      color: white;
-      outline: none;
-      margin-right: 10px;
-      transition: background 0.2s ease;
+      flex: 1; padding: 10px; border: none; border-radius: 6px;
+      background: #3a3c40; color: white; outline: none; margin-right: 10px;
     }
-
-    .input-area input:focus {
-      background: #4a4c50;
-    }
-
     .input-area button {
-      background: #5865f2;
-      border: none;
-      border-radius: 6px;
-      padding: 10px 15px;
-      cursor: pointer;
-      color: white;
-      font-weight: bold;
-      transition: background 0.2s ease;
+      background: #5865f2; border: none; border-radius: 6px;
+      padding: 10px 15px; cursor: pointer; color: white; font-weight: bold;
     }
-
-    .input-area button:hover {
-      background: #4752c4;
+    /* Modal */
+    .modal {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center;
+    }
+    .modal-content {
+      background: #1e1f22; padding: 20px; border-radius: 8px; width: 300px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .modal-content input, .modal-content select {
+      padding: 8px; border: none; border-radius: 6px; background: #3a3c40; color: white;
+    }
+    .modal-content button {
+      background: #5865f2; border: none; padding: 10px; border-radius: 6px;
+      cursor: pointer; color: white; font-weight: bold;
     }
   </style>
 </head>
 <body>
-  <!-- Sidebar -->
   <div class="sidebar">
     <h2>Rooms</h2>
-    <button onclick="createRoom()">+ Create Room</button>
-    <button onclick="joinRoom()">🔑 Join Room</button>
+    <button onclick="openCreateModal()">+ Create Room</button>
+    <button onclick="openJoinModal()">🔑 Join Room</button>
   </div>
 
-  <!-- Main -->
   <div class="main">
     <div class="header" id="welcome">Welcome, @User</div>
-
     <div class="chat" id="chatBox"></div>
-
     <div class="input-area">
       <input type="text" id="messageInput" placeholder="Type a message...">
       <button onclick="sendMessage()">Send</button>
     </div>
   </div>
 
+  <!-- Create Room Modal -->
+  <div class="modal" id="createModal">
+    <div class="modal-content">
+      <h3>Create Room</h3>
+      <input id="roomName" placeholder="Room name">
+      <select id="privacy">
+        <option value="public">Public</option>
+        <option value="private">Private (link only)</option>
+        <option value="password">Password Protected</option>
+      </select>
+      <input id="roomPassword" placeholder="Password (if needed)" style="display:none">
+      <button onclick="createRoom()">Create</button>
+    </div>
+  </div>
+
+  <!-- Join Room Modal -->
+  <div class="modal" id="joinModal">
+    <div class="modal-content">
+      <h3>Join Room</h3>
+      <input id="joinName" placeholder="Room name">
+      <input id="joinPassword" placeholder="Password (if needed)">
+      <button onclick="joinRoom()">Join</button>
+    </div>
+  </div>
+
   <script>
+    const socket = io();
     let username = localStorage.getItem("username") || "Guest";
     document.getElementById("welcome").textContent = `Welcome, @${username}`;
+    let currentRoom = null;
 
-    function addMessage(text, self = false) {
+    function addMessage(user, text, self=false) {
       const chatBox = document.getElementById("chatBox");
       const msg = document.createElement("div");
       msg.className = "message" + (self ? " self" : "");
-      msg.textContent = text;
-
+      msg.textContent = `${user}: ${text}`;
       chatBox.appendChild(msg);
       chatBox.scrollTop = chatBox.scrollHeight;
     }
 
     function sendMessage() {
       const input = document.getElementById("messageInput");
-      if (!input.value.trim()) return;
-      addMessage(input.value, true);
-
-      // TODO: send to server
+      if (!input.value.trim() || !currentRoom) return;
+      socket.emit("chatMessage", { room: currentRoom, user: username, msg: input.value });
       input.value = "";
     }
 
+    function openCreateModal() { document.getElementById("createModal").style.display = "flex"; }
+    function openJoinModal() { document.getElementById("joinModal").style.display = "flex"; }
+
     function createRoom() {
-      const room = prompt("Enter room name:");
-      const password = prompt("Enter a password (optional):");
+      const room = document.getElementById("roomName").value.trim();
+      const privacy = document.getElementById("privacy").value;
+      const password = privacy === "password" ? document.getElementById("roomPassword").value.trim() : null;
+      const privateRoom = (privacy === "private");
       if (room) {
-        alert(`Room "${room}" created ${password ? "with password" : "without password"}.`);
+        socket.emit("createRoom", { room, password, privateRoom });
+        document.getElementById("createModal").style.display = "none";
       }
     }
 
     function joinRoom() {
-      const room = prompt("Enter room name to join:");
-      const password = prompt("Enter password if required:");
+      const room = document.getElementById("joinName").value.trim();
+      const password = document.getElementById("joinPassword").value.trim();
       if (room) {
-        alert(`Joined room "${room}"`);
+        socket.emit("joinRoom", { room, password });
+        document.getElementById("joinModal").style.display = "none";
       }
     }
+
+    document.getElementById("privacy").addEventListener("change", e => {
+      document.getElementById("roomPassword").style.display = e.target.value === "password" ? "block" : "none";
+    });
+
+    socket.on("chatMessage", ({ user, msg }) => {
+      addMessage(user, msg, user === username);
+    });
+
+    socket.on("roomJoined", (room) => {
+      currentRoom = room;
+      document.getElementById("chatBox").innerHTML = "";
+      addMessage("System", `You joined room: ${room}`);
+    });
+
+    socket.on("errorMsg", (msg) => {
+      alert(msg);
+    });
   </script>
 </body>
 </html>
