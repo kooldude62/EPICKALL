@@ -20,6 +20,7 @@ button{cursor:pointer;background:#5865f2;}
 button:hover{background:#4752c4;}
 .chatbox{height:300px;overflow-y:auto;border:1px solid #202225;padding:10px;background:#2f3136;border-radius:4px;margin-bottom:10px;}
 .message{margin:4px 0;}
+.notification{position:fixed;bottom:10px;right:10px;background:#5865f2;padding:8px;border-radius:6px;color:#fff;z-index:1000;}
 </style>
 </head>
 <body>
@@ -80,13 +81,21 @@ button:hover{background:#4752c4;}
 const socket = io();
 let currentUser=null,currentRoom=null,currentDm=null,isAdmin=false;
 
+// Notifications helper
+function showNotification(msg){
+  const notif=document.createElement("div");
+  notif.className="notification"; notif.innerText=msg;
+  document.body.appendChild(notif);
+  setTimeout(()=>notif.remove(),3000);
+}
+
 async function init(){
   const res=await fetch("/me");
   const data=await res.json();
   if(!data.loggedIn){window.location.href="/login.html";return;}
   currentUser=data.username;
+  isAdmin=data.admin||false;
   document.getElementById("welcome").innerText=`Welcome, ${currentUser}`;
-  isAdmin=data.admin;
   if(isAdmin){
     const btn=document.getElementById("adminBtn");
     btn.style.display="inline-block";
@@ -123,6 +132,7 @@ async function loadFriends(){
   const reqsDiv=document.getElementById("friendRequests"); reqsDiv.innerHTML="";
   data.requests.forEach(r=>reqsDiv.innerHTML+=`<div class="friend"><span>${r}</span><button onclick="acceptRequest('${r}')">Accept</button></div>`);
   const listDiv=document.getElementById("friendsList"); listDiv.innerHTML="";
+  document.getElementById("dmList").innerHTML="";
   data.friends.forEach(f=>{
     listDiv.innerHTML+=`<div class="friend"><span>${f}</span></div>`;
     document.getElementById("dmList").innerHTML+=`<div class="dm" onclick="openDm('${f}')"><span>${f}</span></div>`;
@@ -167,6 +177,7 @@ function sendRoomMsg(){
   document.getElementById("roomMsg").value="";
 }
 
+// ROOM MESSAGE EVENTS
 socket.on("chatHistory",msgs=>renderMessages(msgs));
 socket.on("roomMessage",msg=>renderMessage(msg));
 socket.on("updateMessage",msg=>{
@@ -204,6 +215,7 @@ async function deleteMessage(msgId){
   await fetch("/delete-message",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({roomId:currentRoom,msgId})});
 }
 
+// DMS
 function openDm(friend){
   currentDm=friend;
   document.getElementById("dmTitle").innerText=`Chat with ${friend}`;
@@ -215,7 +227,11 @@ async function loadDmMessages(friend){
   const res=await fetch(`/dm/${friend}`);
   const data=await res.json();
   const box=document.getElementById("dmChatBox"); box.innerHTML="";
-  if(data.success) data.messages.forEach(m=>{ box.innerHTML+=`<div class="message"><b>${m.sender}:</b> ${m.message}</div>`; });
+  if(data.success){
+    data.messages.forEach(m=>{
+      box.innerHTML+=`<div class="message"><b>${m.sender}:</b> ${m.message}</div>`;
+    });
+  }
 }
 
 function sendDmMsg(){
@@ -224,6 +240,22 @@ function sendDmMsg(){
   socket.emit("dmMessage",{to:currentDm,from:currentUser,message:msg});
   document.getElementById("dmMsg").value="";
 }
+
+// DM EVENTS
+socket.on("dmMessage", msg=>{
+  if(msg.sender===currentDm || msg.sender===currentUser){
+    const box=document.getElementById("dmChatBox");
+    box.innerHTML+=`<div class="message"><b>${msg.sender}:</b> ${msg.message}</div>`;
+    box.scrollTop=box.scrollHeight;
+  } else {
+    showNotification(`New message from ${msg.sender}`);
+  }
+});
+
+socket.on("dmNotification", data=>{
+  const {from}=data;
+  if(currentDm!==from) showNotification(`New message from ${from}`);
+});
 
 function logout(){fetch("/logout",{method:"POST"}).then(()=>window.location.href="/login.html");}
 
