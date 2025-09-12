@@ -1,86 +1,65 @@
-const express = require("express");
-const session = require("express-session");
-const bodyParser = require("body-parser");
-const path = require("path");
+import express from "express";
+import session from "express-session";
+import multer from "multer";
+import bcrypt from "bcryptjs";
+import fs from "fs";
+import path from "path";
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+const app=express();
+app.use(express.json());
+app.use(express.static("public"));
+app.use(session({secret:"secret",resave:false,saveUninitialized:true}));
 
-// In-memory data store
-const users = {}; // { username: { password, pfp } }
-const rooms = {}; // { roomName: { password, messages: [{user, text}] } }
+const accountsFile="./accounts.json";
+if(!fs.existsSync(accountsFile)) fs.writeFileSync(accountsFile,"[]");
+const upload=multer({dest:"uploads/"});
 
-// Middleware
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, "public")));
-app.use(
-  session({
-    secret: "super-secret-key",
-    resave: false,
-    saveUninitialized: false
-  })
-);
+function getAccounts(){ return JSON.parse(fs.readFileSync(accountsFile,"utf-8")); }
+function saveAccounts(data){ fs.writeFileSync(accountsFile, JSON.stringify(data,null,2)); }
 
-// Check if logged in
-function requireLogin(req, res, next) {
-  if (!req.session.user) return res.redirect("/login.html");
-  next();
-}
-
-// Routes
-app.get("/", requireLogin, (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
+// Signup
+app.post("/signup", upload.single("pfp"), async (req,res)=>{
+  const {username,password}=req.body;
+  const accounts=getAccounts();
+  if(accounts.find(a=>a.username===username)) return res.status(400).send("Username taken");
+  let pfp="";
+  if(req.file) pfp="/uploads/"+req.file.filename;
+  accounts.push({username,password:await bcrypt.hash(password,10),pfp});
+  saveAccounts(accounts);
+  req.session.user=username;
+  res.send("OK");
 });
 
-app.post("/signup", (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) return res.status(400).send("Missing fields");
-  if (users[username]) return res.status(400).send("User exists");
-
-  users[username] = { password, pfp: null };
-  req.session.user = username;
-  res.redirect("/");
+// Login
+app.post("/login", async (req,res)=>{
+  const {username,password}=req.body;
+  const accounts=getAccounts();
+  const user=accounts.find(a=>a.username===username);
+  if(!user) return res.status(400).send("Invalid username");
+  const match=await bcrypt.compare(password,user.password);
+  if(!match) return res.status(400).send("Invalid password");
+  req.session.user=username;
+  res.send("OK");
 });
 
-app.post("/login", (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) return res.status(400).send("Missing fields");
-  if (!users[username] || users[username].password !== password)
-    return res.status(400).send("Invalid credentials");
+// Logout
+app.post("/logout",(req,res)=>{ req.session.destroy(()=>{}); res.send("OK"); });
 
-  req.session.user = username;
-  res.redirect("/");
+// Get account
+app.get("/account",(req,res)=>{
+  if(!req.session.user) return res.status(401).send("Not logged in");
+  const user=getAccounts().find(a=>a.username===req.session.user);
+  res.json({username:user.username,pfp:user.pfp});
 });
 
-app.post("/logout", requireLogin, (req, res) => {
-  req.session.destroy();
-  res.redirect("/login.html");
+// Update PFP
+app.post("/update-pfp",upload.single("pfp"),(req,res)=>{
+  if(!req.session.user) return res.status(401).send("Not logged in");
+  const accounts=getAccounts();
+  const user=accounts.find(a=>a.username===req.session.user);
+  if(req.file) user.pfp="/uploads/"+req.file.filename;
+  saveAccounts(accounts);
+  res.send("OK");
 });
 
-app.post("/create-room", requireLogin, (req, res) => {
-  const { roomName, roomPassword } = req.body;
-  if (!roomName || !roomPassword) return res.status(400).send("Missing fields");
-  if (rooms[roomName]) return res.status(400).send("Room exists");
-
-  rooms[roomName] = { password: roomPassword, messages: [] };
-  res.redirect("/");
-});
-
-app.post("/send-message", requireLogin, (req, res) => {
-  const { roomName, message } = req.body;
-  if (!roomName || !message) return res.status(400).send("Missing fields");
-  if (!rooms[roomName]) return res.status(400).send("Room does not exist");
-
-  rooms[roomName].messages.push({ user: req.session.user, text: message });
-  res.redirect("/");
-});
-
-app.get("/room-messages/:roomName", requireLogin, (req, res) => {
-  const room = rooms[req.params.roomName];
-  if (!room) return res.status(404).send("Room not found");
-  res.json(room.messages);
-});
-
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+app.listen(3000,()=>console.log("Server running"));
