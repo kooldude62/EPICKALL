@@ -1,11 +1,21 @@
-const express = require("express");
+import express from "express";
+import { createServer } from "http";
+import { Server } from "socket.io";
+import bcrypt from "bcrypt";
+import bodyParser from "body-parser";
+import session from "express-session";
+import path from "path";
+import { fileURLToPath } from "url";
+import { dirname } from "path";
+
+// ES module __dirname hack
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// --- App setup ---
 const app = express();
-const http = require("http").createServer(app);
-const io = require("socket.io")(http);
-const bcrypt = require("bcrypt");
-const bodyParser = require("body-parser");
-const session = require("express-session");
-const path = require("path");
+const http = createServer(app);
+const io = new Server(http);
 
 const users = {}; // { username: { passwordHash, friends: [], requests: [], avatar } }
 const rooms = {}; // { roomId: { name, password, inviteOnly, messages: [] } }
@@ -20,13 +30,13 @@ app.use(session({
 }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// Authentication middleware
+// --- Middleware ---
 function checkAuth(req, res, next) {
   if (!req.session.user) return res.redirect("/login.html");
   next();
 }
 
-// Auth routes
+// --- Auth routes ---
 app.post("/signup", async (req, res) => {
   const { username, password } = req.body;
   if (users[username]) return res.json({ success: false, message: "User exists" });
@@ -53,7 +63,7 @@ app.get("/me", (req, res) => {
   res.json({ loggedIn: true, username: req.session.user, avatar: users[req.session.user].avatar });
 });
 
-// Friends
+// --- Friends ---
 app.post("/friend-request", (req, res) => {
   const from = req.session.user;
   const to = req.body.to;
@@ -84,7 +94,7 @@ app.post("/accept-request", (req, res) => {
   res.json({ success: true });
 });
 
-// Rooms
+// --- Rooms ---
 app.post("/create-room", (req, res) => {
   const id = Math.random().toString(36).substring(2, 9);
   rooms[id] = {
@@ -104,7 +114,7 @@ app.get("/rooms", (req, res) => {
   res.json(visibleRooms);
 });
 
-// DM fetch
+// --- DMs ---
 app.get("/dm/:friend", (req, res) => {
   const user = req.session.user;
   const friend = req.params.friend;
@@ -114,8 +124,12 @@ app.get("/dm/:friend", (req, res) => {
   res.json({ success: true, messages: dms[key] || [] });
 });
 
-// Socket.io Chat
+// --- Socket.io ---
 io.on("connection", (socket) => {
+  socket.on("registerUser", (username) => {
+    socket.join(username); // For DMs
+  });
+
   socket.on("joinRoom", ({ roomId, username }) => {
     socket.join(roomId);
     if (rooms[roomId]) {
@@ -143,10 +157,8 @@ io.on("connection", (socket) => {
     io.to(to).emit("dmMessage", msg);
     io.to(from).emit("dmMessage", msg);
   });
-
-  socket.on("registerUser", (username) => {
-    socket.join(username); // For DMs
-  });
 });
 
-http.listen(3000, () => console.log("Server running on http://localhost:3000"));
+// --- Start server ---
+const PORT = process.env.PORT || 3000;
+http.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
