@@ -1,38 +1,41 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Login</title>
-  <link rel="stylesheet" href="/style.css">
+<meta charset="UTF-8">
+<title>Login / Signup</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div style="height:100vh;display:flex;align-items:center;justify-content:center;">
-    <div style="width:380px;background:rgba(255,255,255,0.02);padding:26px;border-radius:12px;">
-      <h2 style="margin:0 0 14px 0;color:#fff">Welcome back</h2>
-      <div class="kv">
-        <input id="username" placeholder="Username">
-        <input id="password" type="password" placeholder="Password">
-      </div>
-      <div style="display:flex;gap:10px">
-        <button onclick="doLogin()" style="flex:1">Login</button>
-        <button onclick="location.href='/signup.html'" style="background:#333;color:#fff">Sign up</button>
-      </div>
-      <p id="err" class="small" style="margin-top:10px;color:#ff8888"></p>
-    </div>
-  </div>
+<div class="auth-container">
+  <h2>Login</h2>
+  <input id="loginUsername" placeholder="Username">
+  <input id="loginPassword" placeholder="Password" type="password">
+  <button id="loginBtn">Login</button>
+  
+  <h2>Signup</h2>
+  <input id="signupUsername" placeholder="Username">
+  <input id="signupPassword" placeholder="Password" type="password">
+  <button id="signupBtn">Signup</button>
+</div>
 
 <script>
-async function doLogin(){
-  const u=document.getElementById('username').value.trim();
-  const p=document.getElementById('password').value;
-  const err=document.getElementById('err');
-  err.textContent='';
-  if(!u||!p){ err.textContent='Please fill fields'; return; }
-  const res=await fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});
-  const text = await res.text();
-  if(res.ok){ localStorage.setItem('user',u); location.href='/'; }
-  else err.textContent = text || 'Login failed';
-}
+document.getElementById("loginBtn").addEventListener("click", async () => {
+  const username = document.getElementById("loginUsername").value;
+  const password = document.getElementById("loginPassword").value;
+  const res = await fetch("/login", { method: "POST", headers: { 'Content-Type':'application/json' }, body: JSON.stringify({username,password}) });
+  const data = await res.json();
+  if(data.success) window.location.href = "/index.html";
+  else alert(data.message);
+});
+
+document.getElementById("signupBtn").addEventListener("click", async () => {
+  const username = document.getElementById("signupUsername").value;
+  const password = document.getElementById("signupPassword").value;
+  const res = await fetch("/signup", { method: "POST", headers: { 'Content-Type':'application/json' }, body: JSON.stringify({username,password}) });
+  const data = await res.json();
+  if(data.success) window.location.href = "/index.html";
+  else alert(data.message);
+});
 </script>
 </body>
 </html>
