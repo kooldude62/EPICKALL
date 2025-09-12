@@ -1,7 +1,56 @@
-body { font-family: Arial, sans-serif; margin: 20px; }
-input { padding: 5px; margin: 5px; }
-button { padding: 5px 10px; margin: 5px; cursor: pointer; }
-#chatBox { border: 1px solid #000; height: 200px; overflow-y: scroll; padding:5px; margin: 5px 0;}
-ul { list-style: none; padding: 0;}
-li { padding:5px; cursor:pointer; border-bottom:1px solid #ddd;}
-li:hover { background-color:#f0f0f0;}
+body {
+  margin:0;
+  font-family: Arial, sans-serif;
+  background-color: #121212;
+  color: #eee;
+  transition: background 0.3s, color 0.3s;
+}
+
+input, button {
+  padding:10px;
+  margin:5px 0;
+  border-radius:5px;
+  border:none;
+  outline:none;
+  transition: background 0.3s, color 0.3s;
+}
+
+input {
+  background: #1e1e1e;
+  color:#eee;
+}
+
+button {
+  background: #6200ee;
+  color: #fff;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #3700b3;
+}
+
+#chatBox {
+  border:1px solid #333;
+  padding:10px;
+  height:300px;
+  overflow-y:auto;
+  margin-bottom:10px;
+  background:#1e1e1e;
+}
+
+ul {
+  list-style:none;
+  padding:0;
+}
+
+li {
+  cursor:pointer;
+  padding:5px;
+  border-radius:5px;
+  transition: background 0.2s;
+}
+
+li:hover {
+  background:#333;
+}
