@@ -1,46 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Account</title>
-<link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <title>Account</title>
 </head>
 <body>
-<div class="auth-container">
   <h2>Account Settings</h2>
-  <p>Username: <span id="accUsername"></span></p>
-  <img id="pfpPreview" src="" alt="Profile Picture" style="width:100px;height:100px;border-radius:50%;object-fit:cover;">
-  <input type="file" id="newPfp" accept="image/*">
-  <button onclick="updatePfp()">Update PFP</button>
-  <button onclick="logout()">Logout</button>
-</div>
-
-<script>
-async function loadAccount(){
-  const res=await fetch("/account");
-  if(res.status===401) return window.location="/login.html";
-  const data=await res.json();
-  document.getElementById("accUsername").innerText=data.username;
-  document.getElementById("pfpPreview").src=data.pfp || "default.png";
-}
-
-async function updatePfp(){
-  const file=document.getElementById("newPfp").files[0];
-  if(!file) return alert("Select a file");
-  const form=new FormData();
-  form.append("pfp",file);
-  const res=await fetch("/update-pfp",{method:"POST",body:form});
-  if(res.ok) alert("Profile picture updated");
-  else alert(await res.text());
-  loadAccount();
-}
-
-async function logout(){
-  await fetch("/logout",{method:"POST"});
-  window.location="/login.html";
-}
-
-loadAccount();
-</script>
+  <form action="/update-pfp" method="POST">
+    <label>Profile Picture URL:</label><br>
+    <input name="pfp" placeholder="Enter image URL"><br>
+    <button type="submit">Save</button>
+  </form>
+  <a href="/">Back to Chat</a>
 </body>
 </html>
