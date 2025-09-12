@@ -1,31 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Login</title>
-<link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <title>Login</title>
 </head>
 <body>
-<div class="auth-container">
   <h2>Login</h2>
-  <input id="username" placeholder="Username">
-  <input id="password" type="password" placeholder="Password">
-  <button onclick="login()">Login</button>
-  <p>Don't have an account? <a href="signup.html">Sign up</a></p>
-</div>
-
-<script>
-async function login(){
-  const username=document.getElementById("username").value;
-  const password=document.getElementById("password").value;
-  const res = await fetch("/login",{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({username,password})
-  });
-  if(res.ok) window.location="/index.html";
-  else alert(await res.text());
-}
-</script>
+  <form action="/login" method="POST">
+    <input name="username" placeholder="Username" required><br>
+    <input name="password" type="password" placeholder="Password" required><br>
+    <button type="submit">Login</button>
+  </form>
+  <a href="/signup.html">Sign Up</a>
 </body>
 </html>
