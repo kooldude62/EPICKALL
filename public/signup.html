@@ -2,31 +2,32 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Sign Up</title>
+<title>Signup</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="auth-container">
-  <h2>Sign Up</h2>
+  <h2>Create Account</h2>
   <input id="username" placeholder="Username">
   <input id="password" type="password" placeholder="Password">
-  <input id="pfp" type="file" accept="image/*">
   <button onclick="signup()">Sign Up</button>
-  <p>Already have an account? <a href="login.html">Login</a></p>
+  <p>Already have an account? <a href="/login.html">Login</a></p>
 </div>
 
 <script>
-async function signup(){
-  const username=document.getElementById("username").value;
-  const password=document.getElementById("password").value;
-  const pfp=document.getElementById("pfp").files[0];
-  const form = new FormData();
-  form.append("username", username);
-  form.append("password", password);
-  if(pfp) form.append("pfp", pfp);
+async function signup() {
+  const username = document.getElementById("username").value.trim();
+  const password = document.getElementById("password").value.trim();
 
-  const res = await fetch("/signup", {method:"POST", body: form});
-  if(res.ok) window.location="/index.html";
+  if(!username || !password) return alert("Please fill in all fields");
+
+  const res = await fetch("/signup", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({username,password})
+  });
+
+  if(res.ok) window.location="/";
   else alert(await res.text());
 }
 </script>
