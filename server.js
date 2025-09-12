@@ -1,148 +1,39 @@
-import express from "express";
-import session from "express-session";
-import bcrypt from "bcryptjs";
-import fs from "fs";
-import path from "path";
-import { Server } from "socket.io";
-import http from "http";
-import { v4 as uuidv4 } from "uuid";
-
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
-
+==> Downloading cache...
+==> Cloning from https://github.com/kooldude62/EPICKALL
+==> Checking out commit 950847cd0746141a2465726e824c6974bf1ce953 in branch main
+==> Transferred 55MB in 8s. Extraction took 1s.
+==> Using Node.js version 22.16.0 (default)
+==> Docs on specifying a Node.js version: https://render.com/docs/node-version
+==> Running build command 'yarn install'...
+yarn install v1.22.22
+info No lockfile found.
+[1/4] Resolving packages...
+warning multer@1.4.5-lts.2: Multer 1.x is impacted by a number of vulnerabilities, which have been patched in 2.x. You should upgrade to the latest 2.x version.
+[2/4] Fetching packages...
+[3/4] Linking dependencies...
+[4/4] Building fresh packages...
+success Saved lockfile.
+Done in 2.80s.
+==> Uploading build...
+==> Uploaded in 3.5s. Compression took 1.1s
+==> Build successful 🎉
+==> Deploying...
+==> Running 'yarn start'
+yarn run v1.22.22
+$ node server.js
+file:///opt/render/project/src/server.js:14
 app.use(express.static(path.join(__dirname, "public")));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Session
-app.use(session({
-  secret: "supersecretkey",
-  resave: false,
-  saveUninitialized: false
-}));
-
-// Database
-const dbFile = path.join(__dirname, "db.json");
-if (!fs.existsSync(dbFile)) fs.writeFileSync(dbFile, JSON.stringify({ users: [], rooms: {}, messages: {} }, null, 2));
-
-function readDB() {
-  return JSON.parse(fs.readFileSync(dbFile, "utf-8"));
-}
-
-function writeDB(data) {
-  fs.writeFileSync(dbFile, JSON.stringify(data, null, 2));
-}
-
-// Signup
-app.post("/signup", async (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) return res.status(400).send("Missing fields");
-
-  const db = readDB();
-  if (db.users.find(u => u.username === username)) return res.status(400).send("Username exists");
-
-  const hash = await bcrypt.hash(password, 10);
-  db.users.push({ username, password: hash });
-  writeDB(db);
-
-  req.session.user = username;
-  res.send({ success: true });
-});
-
-// Login
-app.post("/login", async (req, res) => {
-  const { username, password } = req.body;
-  const db = readDB();
-  const user = db.users.find(u => u.username === username);
-  if (!user) return res.status(400).send("Invalid credentials");
-
-  const match = await bcrypt.compare(password, user.password);
-  if (!match) return res.status(400).send("Invalid credentials");
-
-  req.session.user = username;
-  res.send({ success: true });
-});
-
-// Logout
-app.post("/logout", (req, res) => {
-  req.session.destroy(() => {});
-  res.send({ success: true });
-});
-
-// Account info
-app.get("/account", (req, res) => {
-  const db = readDB();
-  const user = db.users.find(u => u.username === req.session.user);
-  if (!user) return res.status(403).send("Not logged in");
-
-  res.send({ username: user.username });
-});
-
-// Rooms API
-app.get("/rooms", (req, res) => {
-  const db = readDB();
-  res.send(Object.keys(db.rooms));
-});
-
-app.post("/rooms", (req, res) => {
-  const { room } = req.body;
-  if (!room) return res.status(400).send("Room name required");
-
-  const db = readDB();
-  if (!db.rooms[room]) {
-    db.rooms[room] = { creator: req.session.user };
-    db.messages[room] = [];
-    writeDB(db);
-  }
-  res.send({ success: true });
-});
-
-// Socket.io chat
-io.on("connection", (socket) => {
-  let currentRoom = null;
-  let username = null;
-
-  socket.on("joinRoom", ({ room, user }) => {
-    username = user;
-    currentRoom = room;
-    socket.join(room);
-
-    const db = readDB();
-    if (!db.messages[room]) db.messages[room] = [];
-    writeDB(db);
-
-    socket.emit("history", db.messages[room]);
-  });
-
-  socket.on("message", (msg) => {
-    if (!currentRoom) return;
-
-    const db = readDB();
-    const message = { id: uuidv4(), user: username, text: msg, timestamp: Date.now() };
-    db.messages[currentRoom].push(message);
-    writeDB(db);
-
-    io.to(currentRoom).emit("message", message);
-  });
-
-  socket.on("deleteMessage", (msgId) => {
-    if (!currentRoom) return;
-
-    const db = readDB();
-    const message = db.messages[currentRoom].find(m => m.id === msgId);
-    const roomCreator = db.rooms[currentRoom].creator;
-    if (!message) return;
-
-    if (message.user === username || roomCreator === username) {
-      db.messages[currentRoom] = db.messages[currentRoom].filter(m => m.id !== msgId);
-      writeDB(db);
-      io.to(currentRoom).emit("deleteMessage", msgId);
-    }
-  });
-});
-
-// Start server
-server.listen(process.env.PORT || 3000, () => {
-  console.log("Server running on port 3000");
-});
+                                 ^
+ReferenceError: __dirname is not defined in ES module scope
+This file is being treated as an ES module because it has a '.js' file extension and '/opt/render/project/src/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+    at file:///opt/render/project/src/server.js:14:34
+    at ModuleJob.run (node:internal/modules/esm/module_job:274:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:644:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)
+Node.js v22.16.0
+error Command failed with exit code 1.
+info Visit https://yarnpkg.com/en/docs/cli/run for documentation about this command.
+==> Exited with status 1
+==> Common ways to troubleshoot your deploy: https://render.com/docs/troubleshooting-deploys
+==> Running 'yarn start'
+yarn run v1.22.22
