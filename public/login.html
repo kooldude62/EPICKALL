@@ -2,19 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Login / Signup</title>
+<title>Login</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div class="container">
 <h2>Login</h2>
 <input id="loginUser" placeholder="Username">
 <input id="loginPass" type="password" placeholder="Password">
 <button onclick="login()">Login</button>
-
-<h2>Signup</h2>
-<input id="signupUser" placeholder="Username">
-<input id="signupPass" type="password" placeholder="Password">
-<button onclick="signup()">Signup</button>
+<p>Don't have an account? <a href="signup.html">Signup here</a></p>
+</div>
 
 <script>
 async function login() {
@@ -25,21 +23,7 @@ async function login() {
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({username,password})
   });
-  const data = await res.json().catch(()=>{alert(res.statusText)});
-  if(data.ok) window.location="/";
-  else alert(await res.text());
-}
-
-async function signup() {
-  const username = document.getElementById("signupUser").value;
-  const password = document.getElementById("signupPass").value;
-  const res = await fetch("/signup", {
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({username,password})
-  });
-  const data = await res.json().catch(()=>{alert(res.statusText)});
-  if(data.ok) window.location="/";
+  if(res.ok) window.location="/";
   else alert(await res.text());
 }
 </script>
