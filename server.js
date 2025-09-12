@@ -1,13 +1,14 @@
-// server.js
 import express from "express";
 import session from "express-session";
 import bcrypt from "bcryptjs";
-import fs from "fs";
+import multer from "multer";
 import path from "path";
-import http from "http";
-import { Server } from "socket.io";
-import { v4 as uuidv4 } from "uuid";
 import { fileURLToPath } from "url";
+import { Low } from "lowdb";
+import { JSONFile } from "lowdb/node";
+import { Server } from "socket.io";
+import http from "http";
+import { v4 as uuidv4 } from "uuid";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,149 +17,154 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+// Middleware
+app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, "public")));
-
-// Session setup
 app.use(session({
-    secret: "supersecretkey",
-    resave: false,
-    saveUninitialized: false
+  secret: "supersecretkey",
+  resave: false,
+  saveUninitialized: false
 }));
 
-// Accounts storage
-const ACCOUNTS_FILE = path.join(__dirname, "accounts.json");
-if (!fs.existsSync(ACCOUNTS_FILE)) fs.writeFileSync(ACCOUNTS_FILE, "[]");
+// DB
+const file = path.join(__dirname, "db.json");
+const adapter = new JSONFile(file);
+const db = new Low(adapter);
 
-function getAccounts() {
-    return JSON.parse(fs.readFileSync(ACCOUNTS_FILE, "utf-8"));
-}
+await db.read();
+db.data = db.data || { users: [], rooms: {}, messages: {} };
+await db.write();
 
-function saveAccounts(accounts) {
-    fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(accounts, null, 2));
-}
+// Avatar upload
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, path.join(__dirname, "public/avatars")),
+  filename: (req, file, cb) =>
+    cb(null, `${req.session.user}_${Date.now()}${path.extname(file.originalname)}`)
+});
+const upload = multer({ storage });
 
-// Middleware to check login
-function requireLogin(req, res, next) {
-    if (!req.session.user) return res.status(401).send("Not logged in");
-    next();
-}
+// --- Auth Routes ---
 
 // Signup
 app.post("/signup", async (req, res) => {
-    const { username, password } = req.body;
-    if (!username || !password) return res.status(400).send("Missing fields");
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).send("Missing fields");
 
-    const accounts = getAccounts();
-    if (accounts.find(a => a.username === username)) return res.status(400).send("Username taken");
+  const exists = db.data.users.find(u => u.username === username);
+  if (exists) return res.status(400).send("Username taken");
 
-    const hash = await bcrypt.hash(password, 10);
-    accounts.push({ username, password: hash });
-    saveAccounts(accounts);
+  const hash = await bcrypt.hash(password, 10);
+  db.data.users.push({
+    username,
+    password: hash,
+    avatar: "/avatars/default.png"
+  });
+  await db.write();
 
-    req.session.user = username;
-    res.send({ success: true });
+  req.session.user = username;
+  res.send({ success: true });
 });
 
 // Login
 app.post("/login", async (req, res) => {
-    const { username, password } = req.body;
-    if (!username || !password) return res.status(400).send("Missing fields");
+  const { username, password } = req.body;
+  const user = db.data.users.find(u => u.username === username);
+  if (!user) return res.status(400).send("Invalid username");
 
-    const accounts = getAccounts();
-    const user = accounts.find(a => a.username === username);
-    if (!user) return res.status(400).send("Invalid credentials");
+  const match = await bcrypt.compare(password, user.password);
+  if (!match) return res.status(400).send("Invalid password");
 
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) return res.status(400).send("Invalid credentials");
-
-    req.session.user = username;
-    res.send({ success: true });
+  req.session.user = username;
+  res.send({ success: true });
 });
 
 // Logout
 app.post("/logout", (req, res) => {
-    req.session.destroy(() => {});
-    res.send({ success: true });
+  req.session.destroy(() => {});
+  res.send({ success: true });
 });
 
-// Get account info
-app.get("/account", requireLogin, (req, res) => {
-    const accounts = getAccounts();
-    const user = accounts.find(a => a.username === req.session.user);
-    res.send({ username: user.username });
+// Account info
+app.get("/account", (req, res) => {
+  if (!req.session.user) return res.status(401).send("Not logged in");
+  const user = db.data.users.find(u => u.username === req.session.user);
+  res.send({ username: user.username, avatar: user.avatar });
 });
 
-// Rooms
-const roomsFile = path.join(__dirname, "rooms.json");
-if (!fs.existsSync(roomsFile)) fs.writeFileSync(roomsFile, "{}");
+// Update avatar
+app.post("/account/avatar", upload.single("avatar"), async (req, res) => {
+  if (!req.session.user) return res.status(401).send("Not logged in");
 
-function getRooms() {
-    return JSON.parse(fs.readFileSync(roomsFile, "utf-8"));
-}
+  const user = db.data.users.find(u => u.username === req.session.user);
+  if (!user) return res.status(404).send("User not found");
 
-function saveRooms(data) {
-    fs.writeFileSync(roomsFile, JSON.stringify(data, null, 2));
-}
+  user.avatar = "/avatars/" + req.file.filename;
+  await db.write();
 
-// API to get rooms
-app.get("/rooms", requireLogin, (req, res) => {
-    const rooms = getRooms();
-    const roomsArray = Object.keys(rooms).map(name => ({
-        name,
-        hasPassword: !!rooms[name].password
-    }));
-    res.send(roomsArray);
+  res.send({ success: true, avatar: user.avatar });
 });
 
-// Create room
-app.post("/create-room", requireLogin, (req, res) => {
-    const { roomName, roomPassword } = req.body;
-    if (!roomName) return res.status(400).send("Room name required");
-
-    const rooms = getRooms();
-    if (rooms[roomName]) return res.status(400).send("Room already exists");
-
-    rooms[roomName] = { creator: req.session.user, password: roomPassword || "", messages: [] };
-    saveRooms(rooms);
-    res.send({ success: true });
+// --- Room Routes ---
+app.get("/rooms", (req, res) => {
+  if (!req.session.user) return res.status(401).send("Not logged in");
+  res.send(Object.keys(db.data.rooms));
 });
 
-// Socket.io chat
-io.on("connection", socket => {
-    let currentRoom = null;
-    let username = null;
+app.post("/rooms", async (req, res) => {
+  if (!req.session.user) return res.status(401).send("Not logged in");
+  const { room } = req.body;
+  if (!room) return res.status(400).send("Room required");
 
-    socket.on("join-room", ({ roomName, roomPassword, user }) => {
-        const rooms = getRooms();
-        const room = rooms[roomName];
-        if (!room) return socket.emit("error", "Room does not exist");
-
-        if (room.password && room.password !== roomPassword) return socket.emit("error", "Incorrect password");
-
-        currentRoom = roomName;
-        username = user;
-        socket.join(currentRoom);
-
-        socket.emit("history", room.messages);
-    });
-
-    socket.on("message", msg => {
-        if (!currentRoom) return;
-        const rooms = getRooms();
-        const message = { id: uuidv4(), user: username, text: msg, timestamp: Date.now() };
-        rooms[currentRoom].messages.push(message);
-        saveRooms(rooms);
-        io.to(currentRoom).emit("message", message);
-    });
+  if (!db.data.rooms[room]) {
+    db.data.rooms[room] = { creator: req.session.user };
+    db.data.messages[room] = [];
+    await db.write();
+  }
+  res.send({ success: true });
 });
 
-// Redirect root to login if not logged in
-app.get("/", (req, res) => {
-    if (!req.session.user) return res.redirect("/login.html");
-    res.sendFile(path.join(__dirname, "public/index.html"));
+// --- Socket.io Chat ---
+io.on("connection", (socket) => {
+  let currentRoom = null;
+  let username = null;
+
+  socket.on("joinRoom", ({ room, user }) => {
+    username = user;
+    currentRoom = room;
+    socket.join(room);
+
+    socket.emit("history", db.data.messages[room] || []);
+  });
+
+  socket.on("message", async (text) => {
+    if (!currentRoom || !username) return;
+    const message = {
+      id: uuidv4(),
+      user: username,
+      text,
+      timestamp: Date.now()
+    };
+    db.data.messages[currentRoom].push(message);
+    await db.write();
+    io.to(currentRoom).emit("message", message);
+  });
+
+  socket.on("deleteMessage", async (id) => {
+    if (!currentRoom) return;
+    const room = db.data.rooms[currentRoom];
+    const msg = db.data.messages[currentRoom].find(m => m.id === id);
+    if (!msg) return;
+
+    if (msg.user === username || room.creator === username) {
+      db.data.messages[currentRoom] =
+        db.data.messages[currentRoom].filter(m => m.id !== id);
+      await db.write();
+      io.to(currentRoom).emit("deleteMessage", id);
+    }
+  });
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(process.env.PORT || 3000, () => {
+  console.log("Server running");
+});
