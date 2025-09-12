@@ -2,62 +2,191 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Chat</title>
+  <title>Chat App</title>
   <style>
-    body, html { margin: 0; padding: 0; height: 100%; }
-    #chat-container {
-      display: flex; flex-direction: column;
-      height: 100vh; width: 100vw;
-    }
-    #messages {
-      flex: 1; overflow-y: auto;
-      padding: 10px; background: #f2f2f2;
-    }
-    #input {
+    /* Reset & Base */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #2b2d31;
+      color: #e4e6eb;
       display: flex;
+      height: 100vh;
+      overflow: hidden;
     }
-    #input input { flex: 1; padding: 10px; }
-    #input button { padding: 10px; }
+
+    /* Sidebar */
+    .sidebar {
+      width: 250px;
+      background: #1e1f22;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid #3a3c40;
+      transition: all 0.3s ease;
+    }
+
+    .sidebar h2 {
+      margin-bottom: 20px;
+      font-size: 18px;
+      color: #f2f2f2;
+    }
+
+    .sidebar button {
+      background: #5865f2;
+      color: white;
+      border: none;
+      padding: 10px;
+      margin-bottom: 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: background 0.2s ease;
+    }
+
+    .sidebar button:hover {
+      background: #4752c4;
+    }
+
+    /* Main Content */
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header */
+    .header {
+      padding: 15px;
+      background: #1e1f22;
+      border-bottom: 1px solid #3a3c40;
+      font-size: 16px;
+      font-weight: bold;
+      color: #f2f2f2;
+    }
+
+    /* Chat Area */
+    .chat {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .message {
+      background: #3a3c40;
+      padding: 10px 15px;
+      border-radius: 8px;
+      max-width: 70%;
+      word-wrap: break-word;
+      transition: transform 0.2s ease, opacity 0.2s ease;
+    }
+
+    .message.self {
+      align-self: flex-end;
+      background: #5865f2;
+      color: white;
+    }
+
+    /* Message Input */
+    .input-area {
+      display: flex;
+      padding: 15px;
+      background: #1e1f22;
+      border-top: 1px solid #3a3c40;
+    }
+
+    .input-area input {
+      flex: 1;
+      padding: 10px;
+      border: none;
+      border-radius: 6px;
+      background: #3a3c40;
+      color: white;
+      outline: none;
+      margin-right: 10px;
+      transition: background 0.2s ease;
+    }
+
+    .input-area input:focus {
+      background: #4a4c50;
+    }
+
+    .input-area button {
+      background: #5865f2;
+      border: none;
+      border-radius: 6px;
+      padding: 10px 15px;
+      cursor: pointer;
+      color: white;
+      font-weight: bold;
+      transition: background 0.2s ease;
+    }
+
+    .input-area button:hover {
+      background: #4752c4;
+    }
   </style>
 </head>
 <body>
-  <div id="chat-container">
-    <div id="messages"></div>
-    <div id="input">
-      <input id="msg" placeholder="Type a message">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <h2>Rooms</h2>
+    <button onclick="createRoom()">+ Create Room</button>
+    <button onclick="joinRoom()">🔑 Join Room</button>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="header" id="welcome">Welcome, @User</div>
+
+    <div class="chat" id="chatBox"></div>
+
+    <div class="input-area">
+      <input type="text" id="messageInput" placeholder="Type a message...">
       <button onclick="sendMessage()">Send</button>
     </div>
   </div>
-  <script src="/socket.io/socket.io.js"></script>
+
   <script>
-    const socket = io();
-    const messagesDiv = document.getElementById("messages");
+    let username = localStorage.getItem("username") || "Guest";
+    document.getElementById("welcome").textContent = `Welcome, @${username}`;
 
-    fetch("/account-info").then(r => r.json()).then(data => {
-      socket.emit("registerUser", data.username);
-    });
+    function addMessage(text, self = false) {
+      const chatBox = document.getElementById("chatBox");
+      const msg = document.createElement("div");
+      msg.className = "message" + (self ? " self" : "");
+      msg.textContent = text;
 
-    socket.on("chatHistory", (msgs) => {
-      msgs.forEach(addMessage);
-    });
-
-    socket.on("chatMessage", (msg) => {
-      addMessage(msg);
-    });
+      chatBox.appendChild(msg);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
 
     function sendMessage() {
-      const msg = document.getElementById("msg").value;
-      if (msg.trim() !== "") {
-        socket.emit("chatMessage", msg);
-        document.getElementById("msg").value = "";
+      const input = document.getElementById("messageInput");
+      if (!input.value.trim()) return;
+      addMessage(input.value, true);
+
+      // TODO: send to server
+      input.value = "";
+    }
+
+    function createRoom() {
+      const room = prompt("Enter room name:");
+      const password = prompt("Enter a password (optional):");
+      if (room) {
+        alert(`Room "${room}" created ${password ? "with password" : "without password"}.`);
       }
     }
 
-    function addMessage(msg) {
-      const div = document.createElement("div");
-      div.textContent = msg.user + ": " + msg.text;
-      messagesDiv.appendChild(div);
-      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    function joinRoom() {
+      const room = prompt("Enter room name to join:");
+      const password = prompt("Enter password if required:");
+      if (room) {
+        alert(`Joined room "${room}"`);
+      }
     }
   </script>
 </body>
