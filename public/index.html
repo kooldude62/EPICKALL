@@ -7,6 +7,7 @@
 <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
+<div class="container">
 <h2>Welcome <span id="username"></span></h2>
 <button onclick="logout()">Logout</button>
 
@@ -19,39 +20,40 @@
 <ul id="roomsList"></ul>
 
 <h3>Chat</h3>
-<div id="chatBox" style="border:1px solid black; height:200px; overflow-y:scroll;"></div>
+<div id="chatBox"></div>
 <input id="msgInput" placeholder="Type a message">
 <button onclick="sendMessage()">Send</button>
+</div>
 
 <script>
 let socket = io();
 let currentRoom = "";
-let username = "Anonymous";
+let username = "";
 
-// fetch username from session
-username = prompt("Enter your username for display (same as login)");
-document.getElementById("username").innerText = username;
+(async function init(){
+  const res = await fetch("/rooms");
+  if(res.status === 401) return window.location="/login.html";
+  username = prompt("Set display name") || "Anonymous";
+  document.getElementById("username").innerText=username;
+  loadRooms();
+})();
 
-// Fetch rooms
 async function loadRooms(){
   const res = await fetch("/rooms");
   const rooms = await res.json();
   const list = document.getElementById("roomsList");
   list.innerHTML="";
-  Object.keys(rooms).forEach(r=>{
+  rooms.forEach(r=>{
     const li = document.createElement("li");
-    li.textContent = r;
-    li.style.cursor="pointer";
+    li.textContent = r.name + (r.hasPassword ? " 🔒" : "");
     li.onclick=()=>{
-      const pass = prompt("Enter room password (if any)");
-      joinRoom(r, pass||"");
+      const pass = r.hasPassword ? prompt("Enter room password") : "";
+      joinRoom(r.name, pass||"");
     }
     list.appendChild(li);
   });
 }
-loadRooms();
 
-// Create Room
 async function createRoom(){
   const roomName = document.getElementById("roomName").value;
   const roomPassword = document.getElementById("roomPassword").value;
@@ -60,20 +62,15 @@ async function createRoom(){
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({roomName,roomPassword})
   });
-  const data = await res.json();
-  if(data.ok){
-    alert("Room created");
-    loadRooms();
-  } else alert("Error");
+  if(res.ok){ loadRooms(); }
+  else alert(await res.text());
 }
 
-// Join Room
 function joinRoom(room, pass){
   currentRoom = room;
-  socket.emit("join-room",{roomName:room,roomPassword:pass});
+  socket.emit("join-room",{roomName:room, roomPassword:pass, username});
 }
 
-// Chat history
 socket.on("history", messages=>{
   const box = document.getElementById("chatBox");
   box.innerHTML="";
@@ -84,27 +81,4 @@ socket.on("history", messages=>{
   });
 });
 
-// Receive new messages
 socket.on("message", m=>{
-  const box = document.getElementById("chatBox");
-  const div = document.createElement("div");
-  div.textContent = `${m.user}: ${m.text}`;
-  box.appendChild(div);
-});
-
-// Send message
-function sendMessage(){
-  const msg = document.getElementById("msgInput").value;
-  if(!currentRoom) return alert("Join a room first");
-  socket.emit("message",{roomName:currentRoom,user:username,text:msg});
-  document.getElementById("msgInput").value="";
-}
-
-// Logout
-async function logout(){
-  await fetch("/logout",{method:"POST"});
-  window.location="/login.html";
-}
-</script>
-</body>
-</html>
