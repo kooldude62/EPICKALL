@@ -1,27 +1,120 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Account Settings</title>
-  <style>
-    body { background: #18191c; color: #e4e6eb; font-family: Arial;
-      display: flex; justify-content: center; align-items: center; height: 100vh; }
-    .card { background: #2b2d31; padding: 30px; border-radius: 12px; width: 350px; text-align: center; box-shadow: 0 0 15px rgba(0,0,0,0.4); animation: fadeIn 0.5s ease; }
-    input, button { width: 100%; padding: 10px; margin: 10px 0; border-radius: 6px; border: none; }
-    input { background: #3a3c40; color: white; }
-    button { background: #5865f2; color: white; font-weight: bold; cursor: pointer; }
-    button:hover { background: #4752c4; }
-    a { color: #00aff4; text-decoration: none; font-size: 14px; }
-    @keyframes fadeIn { from {opacity:0; transform: translateY(20px);} to {opacity:1; transform: translateY(0);} }
-  </style>
+<meta charset="UTF-8">
+<title>Account Settings</title>
+<style>
+body{margin:0;font-family:Arial;background:#2c2f33;color:#fff;}
+.navbar{display:flex;justify-content:space-between;align-items:center;background:#23272a;padding:10px;}
+input,button,select{background:#2f3136;color:#fff;border:none;padding:8px;margin:5px 0;border-radius:4px;}
+button{cursor:pointer;background:#5865f2;}
+button:hover{background:#4752c4;}
+label{display:block;margin:8px 0;}
+.preview{width:80px;height:80px;border-radius:50%;border:2px solid #5865f2;margin-bottom:10px;}
+</style>
 </head>
 <body>
-  <form class="card" method="POST" action="/updateAccount">
-    <h2>Account Settings</h2>
-    <input type="text" name="username" placeholder="New Username">
-    <input type="text" name="pfp" placeholder="Profile picture URL">
-    <button type="submit">Save</button>
-    <a href="/">Back to Chat</a>
-  </form>
+<div class="navbar">
+<h2>Account Settings</h2>
+<button onclick="window.location.href='/index.html'">Back</button>
+</div>
+
+<h3>Profile Picture</h3>
+<img id="pfpPreview" class="preview" src="/default-pfp.png" alt="Profile Picture">
+<input type="file" id="pfpInput" accept="image/*">
+<button onclick="changePFP()">Update PFP</button>
+
+<h3>Theme</h3>
+<label>Current Theme:</label>
+<select id="themeSelect"></select>
+<button onclick="applyTheme()">Apply Theme</button>
+
+<h3>Add Custom Theme</h3>
+<input type="text" id="themeName" placeholder="Theme Name">
+<input type="color" id="bgColor" value="#2c2f33">
+<input type="color" id="textColor" value="#ffffff">
+<button onclick="addTheme()">Add Theme</button>
+
+<script>
+let currentUser = null;
+let themes = {};
+
+// Fetch user data on load
+async function init(){
+  const res = await fetch("/me");
+  const data = await res.json();
+  if(!data.loggedIn){window.location.href="/login.html"; return;}
+  currentUser = data.username;
+
+  // Load PFP
+  document.getElementById("pfpPreview").src = data.pfp || "/default-pfp.png";
+
+  // Load themes
+  themes = data.themes || { "Default": {bg:"#2c2f33", text:"#fff"} };
+  const select = document.getElementById("themeSelect");
+  select.innerHTML = "";
+  for(const t in themes){
+    const opt = document.createElement("option");
+    opt.value = t;
+    opt.innerText = t;
+    select.appendChild(opt);
+  }
+}
+
+// Change Profile Picture
+async function changePFP(){
+  const file = document.getElementById("pfpInput").files[0];
+  if(!file){alert("Select an image"); return;}
+  const formData = new FormData();
+  formData.append("pfp", file);
+
+  const res = await fetch("/update-pfp", { method:"POST", body:formData });
+  const data = await res.json();
+  if(data.success){
+    document.getElementById("pfpPreview").src = data.url;
+    alert("Profile picture updated!");
+  } else alert(data.message);
+}
+
+// Apply selected theme
+async function applyTheme(){
+  const sel = document.getElementById("themeSelect").value;
+  const theme = themes[sel];
+  if(!theme) return;
+  document.body.style.background = theme.bg;
+  document.body.style.color = theme.text;
+
+  // Save preference
+  await fetch("/set-theme", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({theme:sel})
+  });
+}
+
+// Add new custom theme
+async function addTheme(){
+  const name = document.getElementById("themeName").value.trim();
+  const bg = document.getElementById("bgColor").value;
+  const text = document.getElementById("textColor").value;
+  if(!name){alert("Theme must have a name"); return;}
+  
+  const res = await fetch("/add-theme", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({name,bg,text})
+  });
+  const data = await res.json();
+  if(data.success){
+    themes[name] = {bg,text};
+    const select = document.getElementById("themeSelect");
+    const opt = document.createElement("option"); opt.value=name; opt.innerText=name;
+    select.appendChild(opt);
+    alert("Theme added!");
+  } else alert(data.message);
+}
+
+init();
+</script>
 </body>
 </html>
