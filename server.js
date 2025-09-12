@@ -15,9 +15,11 @@ const app = express();
 const http = createServer(app);
 const io = new Server(http);
 
-const users = {}; 
-const rooms = {}; 
-const dms = {};   
+// --- Data ---
+const users = {}; // username -> { passwordHash, friends, requests, avatar }
+const rooms = {}; // roomId -> { name, password, inviteOnly, messages }
+const dms = {};   // "userA_userB" -> [{sender,message,time}]
+const adminIPs = ["127.0.0.1"]; // add trusted admin IPs here
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -28,8 +30,14 @@ app.use(session({
 }));
 app.use(express.static(path.join(__dirname, "public")));
 
+// --- Middleware ---
 function checkAuth(req, res, next) {
   if (!req.session.user) return res.redirect("/login.html");
+  next();
+}
+
+function checkAdmin(req, res, next) {
+  if (!adminIPs.includes(req.ip)) return res.status(403).send("Forbidden");
   next();
 }
 
@@ -72,7 +80,6 @@ app.post("/friend-request", (req, res) => {
   const from = req.session.user;
   const to = req.body.to;
   if (!from || !users[to]) return res.json({ success: false });
-
   if (from === to) return res.json({ success: false, message: "You can’t friend yourself!" });
 
   if (!users[to].requests.includes(from) && !users[to].friends.includes(from)) {
@@ -100,13 +107,15 @@ app.post("/accept-request", (req, res) => {
 
 // --- Rooms ---
 app.post("/create-room", (req, res) => {
+  const { name, password, inviteOnly } = req.body;
+
+  // Check for duplicate room name
+  for (const r of Object.values(rooms)) {
+    if (r.name === name) return res.json({ success: false, message: "Room name already exists" });
+  }
+
   const id = Math.random().toString(36).substring(2, 9);
-  rooms[id] = {
-    name: req.body.name || "Untitled",
-    password: req.body.password || null,
-    inviteOnly: req.body.inviteOnly || false,
-    messages: []
-  };
+  rooms[id] = { name, password: password || null, inviteOnly: !!inviteOnly, messages: [] };
   res.json({ success: true, roomId: id, inviteLink: `${req.protocol}://${req.get("host")}/room/${id}` });
 });
 
@@ -118,7 +127,7 @@ app.get("/rooms", (req, res) => {
   res.json(visibleRooms);
 });
 
-// --- DMs ---
+// --- DM ---
 app.get("/dm/:friend", (req, res) => {
   const user = req.session.user;
   const friend = req.params.friend;
@@ -128,17 +137,23 @@ app.get("/dm/:friend", (req, res) => {
   res.json({ success: true, messages: dms[key] || [] });
 });
 
+// --- Admin panel ---
+app.get("/admin", checkAdmin, (req, res) => {
+  res.sendFile(path.join(__dirname, "public/admin.html"));
+});
+
+// --- Room page ---
+app.get("/room/:roomId", checkAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, "public/room.html"));
+});
+
 // --- Socket.io ---
 io.on("connection", (socket) => {
-  socket.on("registerUser", (username) => {
-    socket.join(username); // For DMs
-  });
+  socket.on("registerUser", (username) => socket.join(username));
 
   socket.on("joinRoom", ({ roomId, username }) => {
     socket.join(roomId);
-    if (rooms[roomId]) {
-      socket.emit("chatHistory", rooms[roomId].messages);
-    }
+    if (rooms[roomId]) socket.emit("chatHistory", rooms[roomId].messages);
   });
 
   socket.on("roomMessage", ({ roomId, username, message }) => {
@@ -152,12 +167,10 @@ io.on("connection", (socket) => {
   socket.on("dmMessage", ({ to, from, message }) => {
     if (!users[to] || !users[from]) return;
     if (!users[to].friends.includes(from)) return;
-
     const key = [to, from].sort().join("_");
     if (!dms[key]) dms[key] = [];
     const msg = { sender: from, message, time: new Date() };
     dms[key].push(msg);
-
     io.to(to).emit("dmMessage", msg);
     io.to(from).emit("dmMessage", msg);
   });
