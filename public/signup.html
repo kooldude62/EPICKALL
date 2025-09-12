@@ -1,19 +1,34 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Sign Up</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<title>Sign Up</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="container">
-    <h2>Sign Up</h2>
-    <form action="/signup" method="POST">
-      <input type="text" name="username" placeholder="Username" required>
-      <input type="password" name="password" placeholder="Password" required>
-      <button type="submit">Sign Up</button>
-    </form>
-    <p>Already have an account? <a href="login.html">Login</a></p>
-  </div>
+<div class="auth-container">
+  <h2>Sign Up</h2>
+  <input id="username" placeholder="Username">
+  <input id="password" type="password" placeholder="Password">
+  <input id="pfp" type="file" accept="image/*">
+  <button onclick="signup()">Sign Up</button>
+  <p>Already have an account? <a href="login.html">Login</a></p>
+</div>
+
+<script>
+async function signup(){
+  const username=document.getElementById("username").value;
+  const password=document.getElementById("password").value;
+  const pfp=document.getElementById("pfp").files[0];
+  const form = new FormData();
+  form.append("username", username);
+  form.append("password", password);
+  if(pfp) form.append("pfp", pfp);
+
+  const res = await fetch("/signup", {method:"POST", body: form});
+  if(res.ok) window.location="/index.html";
+  else alert(await res.text());
+}
+</script>
 </body>
 </html>
