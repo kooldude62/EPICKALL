@@ -13,17 +13,15 @@ const io = new Server(server);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Sessions
 app.use(session({
   secret: "secret-key",
   resave: false,
-  saveUninitialized: true,
+  saveUninitialized: true
 }));
 
-// Serve static files
 app.use(express.static("public"));
 
-// Storage folder
+// Storage
 const STORAGE_DIR = path.join(process.cwd(), "storage");
 if (!fs.existsSync(STORAGE_DIR)) fs.mkdirSync(STORAGE_DIR);
 
@@ -36,9 +34,7 @@ if (!fs.existsSync(roomsFile)) fs.writeFileSync(roomsFile, JSON.stringify({}));
 const readJSON = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
 const writeJSON = (file, data) => fs.writeFileSync(file, JSON.stringify(data, null, 2));
 
-// ----- Routes -----
-
-// Login page redirect if logged in
+// Routes
 app.get("/", (req, res) => {
   if (!req.session.user) return res.redirect("/login.html");
   res.sendFile(path.join(process.cwd(), "public", "index.html"));
@@ -48,6 +44,7 @@ app.get("/", (req, res) => {
 app.post("/signup", async (req, res) => {
   const { username, password } = req.body;
   const users = readJSON(usersFile);
+
   if (users[username]) return res.status(400).send("User exists");
 
   const hash = await bcrypt.hash(password, 10);
@@ -93,21 +90,19 @@ app.post("/create-room", (req, res) => {
 app.get("/rooms", (req, res) => {
   if (!req.session.user) return res.status(401).send("Not logged in");
   const rooms = readJSON(roomsFile);
-  res.send(rooms);
+  const roomList = Object.keys(rooms).map(r => ({ name: r, hasPassword: !!rooms[r].password }));
+  res.send(roomList);
 });
 
-// ----- Socket.io -----
-
+// Socket.io
 io.on("connection", (socket) => {
-
-  socket.on("join-room", ({ roomName, roomPassword }) => {
+  socket.on("join-room", ({ roomName, roomPassword, username }) => {
     const rooms = readJSON(roomsFile);
     if (!rooms[roomName]) return socket.emit("error", "Room does not exist");
     if (rooms[roomName].password && rooms[roomName].password !== roomPassword)
       return socket.emit("error", "Incorrect room password");
 
     socket.join(roomName);
-    // send chat history
     socket.emit("history", rooms[roomName].messages);
   });
 
@@ -119,7 +114,6 @@ io.on("connection", (socket) => {
     writeJSON(roomsFile, rooms);
     io.to(roomName).emit("message", message);
   });
-
 });
 
 server.listen(3000, () => console.log("Server running on port 3000"));
