@@ -8,18 +8,16 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 
-// ES module __dirname hack
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// --- App setup ---
 const app = express();
 const http = createServer(app);
 const io = new Server(http);
 
-const users = {}; // { username: { passwordHash, friends: [], requests: [], avatar } }
-const rooms = {}; // { roomId: { name, password, inviteOnly, messages: [] } }
-const dms = {};   // { "userA_userB": [{ sender, message, time }] }
+const users = {}; 
+const rooms = {}; 
+const dms = {};   
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -30,13 +28,12 @@ app.use(session({
 }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// --- Middleware ---
 function checkAuth(req, res, next) {
   if (!req.session.user) return res.redirect("/login.html");
   next();
 }
 
-// --- Auth routes ---
+// --- Auth ---
 app.post("/signup", async (req, res) => {
   const { username, password } = req.body;
   if (users[username]) return res.json({ success: false, message: "User exists" });
@@ -56,6 +53,13 @@ app.post("/login", async (req, res) => {
 
   req.session.user = username;
   res.json({ success: true });
+});
+
+app.post("/logout", (req, res) => {
+  req.session.destroy(err => {
+    if (err) return res.json({ success: false });
+    res.json({ success: true });
+  });
 });
 
 app.get("/me", (req, res) => {
@@ -159,6 +163,5 @@ io.on("connection", (socket) => {
   });
 });
 
-// --- Start server ---
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
