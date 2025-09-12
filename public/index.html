@@ -1,75 +1,119 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Chat Rooms</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<title>Chat</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="container">
-    <h2>Welcome, <span id="username"></span></h2>
-    <form action="/logout" method="POST">
-      <button type="submit">Logout</button>
-    </form>
+<div class="container">
+  <!-- Left panel: rooms -->
+  <div class="left-panel">
+    <header>
+      <h2>Welcome <span id="username"></span></h2>
+      <button onclick="logout()">Logout</button>
+    </header>
 
-    <div class="chat-container">
-      <div class="rooms-box">
-        <h3>Rooms</h3>
-        <div id="rooms-list"></div>
-        <form class="room-form" action="/create-room" method="POST">
-          <input type="text" name="roomName" placeholder="Room name" required>
-          <input type="password" name="roomPassword" placeholder="Room password" required>
-          <button type="submit">Create Room</button>
-        </form>
-      </div>
+    <div class="room-creation">
+      <input id="roomName" placeholder="Room Name">
+      <input id="roomPassword" placeholder="Room Password">
+      <button onclick="createRoom()">Create Room</button>
+    </div>
 
-      <div class="chat-box">
-        <h3>Chat</h3>
-        <div id="messages"></div>
-        <form id="message-form">
-          <input type="text" id="roomName" placeholder="Room name" required>
-          <input type="text" id="message" placeholder="Type a message" required>
-          <button type="submit">Send</button>
-        </form>
-      </div>
+    <div class="rooms">
+      <h3>Available Rooms</h3>
+      <ul id="roomsList"></ul>
     </div>
   </div>
 
-  <script>
-    // Set username
-    fetch('/').then(r => {
-      document.getElementById('username').innerText = 'User';
-    });
+  <!-- Right panel: chat -->
+  <div class="right-panel">
+    <div id="chatBox" class="chat-box"></div>
+    <div class="chat-controls">
+      <input id="msgInput" placeholder="Type a message">
+      <button onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+</div>
 
-    // Update rooms
-    const roomsList = document.getElementById('rooms-list');
-    async function updateRooms() {
-      roomsList.innerHTML = '';
-      const rooms = await fetch('/room-messages').then(r => r.json()).catch(() => ({}));
-      for (const r in rooms) {
-        const div = document.createElement('div');
-        div.innerText = r;
-        roomsList.appendChild(div);
-      }
+<script src="/socket.io/socket.io.js"></script>
+<script>
+let socket = io();
+let currentRoom = "";
+let username = "";
+
+async function init(){
+  const res = await fetch("/rooms");
+  if(res.status===401) return window.location="/login.html";
+  username = prompt("Enter display name")||"Anonymous";
+  document.getElementById("username").innerText=username;
+  loadRooms();
+}
+
+async function loadRooms(){
+  const res = await fetch("/rooms");
+  const rooms = await res.json();
+  const list = document.getElementById("roomsList");
+  list.innerHTML="";
+  rooms.forEach(r=>{
+    const li = document.createElement("li");
+    li.textContent = r.name + (r.hasPassword?" 🔒":"");
+    li.onclick=()=>{
+      const pass = r.hasPassword ? prompt("Enter room password") : "";
+      joinRoom(r.name, pass||"");
     }
-    updateRooms();
+    list.appendChild(li);
+  });
+}
 
-    // Send messages
-    const messageForm = document.getElementById('message-form');
-    messageForm.addEventListener('submit', async e => {
-      e.preventDefault();
-      const roomName = document.getElementById('roomName').value;
-      const message = document.getElementById('message').value;
-      if (!roomName || !message) return;
+async function createRoom(){
+  const roomName = document.getElementById("roomName").value;
+  const roomPassword = document.getElementById("roomPassword").value;
+  const res = await fetch("/create-room",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({roomName,roomPassword})
+  });
+  if(res.ok){ loadRooms(); }
+  else alert(await res.text());
+}
 
-      await fetch('/send-message', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `roomName=${encodeURIComponent(roomName)}&message=${encodeURIComponent(message)}`
-      });
+function joinRoom(room, pass){
+  currentRoom=room;
+  socket.emit("join-room",{roomName:room,roomPassword:pass,username});
+}
 
-      document.getElementById('message').value = '';
-    });
-  </script>
+socket.on("history", messages=>{
+  const box=document.getElementById("chatBox");
+  box.innerHTML="";
+  messages.forEach(m=>{
+    const div=document.createElement("div");
+    div.textContent=`${m.user}: ${m.text}`;
+    box.appendChild(div);
+  });
+});
+
+socket.on("message", m=>{
+  const box=document.getElementById("chatBox");
+  const div=document.createElement("div");
+  div.textContent=`${m.user}: ${m.text}`;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+});
+
+function sendMessage(){
+  const msg=document.getElementById("msgInput").value;
+  if(!currentRoom) return alert("Join a room first");
+  socket.emit("message",{roomName:currentRoom,user:username,text:msg});
+  document.getElementById("msgInput").value="";
+}
+
+async function logout(){
+  await fetch("/logout",{method:"POST"});
+  window.location="/login.html";
+}
+
+init();
+</script>
 </body>
 </html>
