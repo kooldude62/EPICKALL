@@ -1,0 +1,7 @@
+body { font-family: Arial, sans-serif; margin: 20px; }
+input { padding: 5px; margin: 5px; }
+button { padding: 5px 10px; margin: 5px; cursor: pointer; }
+#chatBox { border: 1px solid #000; height: 200px; overflow-y: scroll; padding:5px; margin: 5px 0;}
+ul { list-style: none; padding: 0;}
+li { padding:5px; cursor:pointer; border-bottom:1px solid #ddd;}
+li:hover { background-color:#f0f0f0;}
