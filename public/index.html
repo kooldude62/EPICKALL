@@ -1,343 +1,233 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Chat App</title>
-  <script src="/socket.io/socket.io.js"></script>
-  <style>
-    body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-      background: #2c2f33;
-      color: #fff;
-    }
-    .navbar {
-      display: flex;
-      background: #23272a;
-      padding: 10px;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .navbar h2 {
-      margin: 0;
-      font-size: 18px;
-    }
-    .tabs {
-      display: flex;
-      background: #23272a;
-    }
-    .tab {
-      flex: 1;
-      text-align: center;
-      padding: 12px;
-      cursor: pointer;
-      transition: background 0.3s;
-    }
-    .tab:hover {
-      background: #40444b;
-    }
-    .tab.active {
-      background: #7289da;
-    }
-    .content {
-      padding: 15px;
-      display: none;
-      animation: fadeIn 0.4s ease;
-    }
-    .content.active {
-      display: block;
-    }
-    .friend, .room, .dm {
-      background: #40444b;
-      margin: 6px 0;
-      padding: 10px;
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      transition: background 0.3s;
-    }
-    .friend:hover, .room:hover, .dm:hover {
-      background: #5865f2;
-    }
-    input, button, textarea {
-      background: #2f3136;
-      color: #fff;
-      border: none;
-      padding: 8px;
-      margin: 5px 0;
-      border-radius: 4px;
-      width: 100%;
-    }
-    button {
-      cursor: pointer;
-      background: #5865f2;
-      transition: background 0.3s;
-    }
-    button:hover {
-      background: #4752c4;
-    }
-    .chatbox {
-      height: 300px;
-      overflow-y: auto;
-      border: 1px solid #202225;
-      padding: 10px;
-      background: #2f3136;
-      border-radius: 4px;
-      margin-bottom: 10px;
-    }
-    .message {
-      margin: 4px 0;
-    }
-    .invite-box {
-      margin-top: 10px;
-    }
-    .invite-box input {
-      background: #1e2124;
-      font-size: 14px;
-    }
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(10px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    .avatar {
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      margin-right: 8px;
-    }
-  </style>
+<meta charset="UTF-8">
+<title>Chat App</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+body{margin:0;font-family:Arial;background:#2c2f33;color:#fff;}
+.navbar{display:flex;justify-content:space-between;align-items:center;background:#23272a;padding:10px;}
+.tabs{display:flex;background:#23272a;}
+.tab{flex:1;text-align:center;padding:12px;cursor:pointer;transition:0.3s;}
+.tab:hover{background:#40444b;}
+.tab.active{background:#7289da;}
+.content{padding:15px;display:none;}
+.content.active{display:block;}
+.friend,.room,.dm{background:#40444b;margin:6px 0;padding:10px;border-radius:6px;display:flex;justify-content:space-between;}
+.friend:hover,.room:hover,.dm:hover{background:#5865f2;}
+input,button{background:#2f3136;color:#fff;border:none;padding:8px;margin:5px 0;border-radius:4px;}
+button{cursor:pointer;background:#5865f2;}
+button:hover{background:#4752c4;}
+.chatbox{height:300px;overflow-y:auto;border:1px solid #202225;padding:10px;background:#2f3136;border-radius:4px;margin-bottom:10px;}
+.message{margin:4px 0;}
+</style>
 </head>
 <body>
-  <div class="navbar">
-    <h2 id="welcome">Welcome</h2>
-    <button onclick="logout()">Logout</button>
-  </div>
-  <div class="tabs">
-    <div class="tab active" onclick="switchTab('friends')">Friends</div>
-    <div class="tab" onclick="switchTab('rooms')">Rooms</div>
-    <div class="tab" onclick="switchTab('dms')">DMs</div>
-  </div>
+<div class="navbar">
+<h2 id="welcome">Welcome</h2>
+<div>
+<button id="adminBtn" style="display:none;">Admin Panel</button>
+<button onclick="logout()">Logout</button>
+</div>
+</div>
 
-  <!-- Friends Tab -->
-  <div id="friends" class="content active">
-    <h3>Friends</h3>
-    <input type="text" id="searchUser" placeholder="Search username">
-    <button onclick="searchUser()">Search</button>
-    <div id="searchResults"></div>
-    <h4>Friend Requests</h4>
-    <div id="friendRequests"></div>
-    <h4>Your Friends</h4>
-    <div id="friendsList"></div>
-  </div>
+<div class="tabs">
+<div class="tab active" onclick="switchTab('friends')">Friends</div>
+<div class="tab" onclick="switchTab('rooms')">Rooms</div>
+<div class="tab" onclick="switchTab('dms')">DMs</div>
+</div>
 
-  <!-- Rooms Tab -->
-  <div id="rooms" class="content">
-    <h3>Rooms</h3>
-    <input type="text" id="roomName" placeholder="Room name">
-    <input type="password" id="roomPassword" placeholder="Password (optional)">
-    <label><input type="checkbox" id="inviteOnly"> Invite Only</label>
-    <button onclick="createRoom()">Create Room</button>
-    <div id="inviteBox" class="invite-box"></div>
-    <h4>Available Rooms</h4>
-    <div id="roomsList"></div>
-    <div id="roomChat" style="display:none;">
-      <h4 id="roomTitle"></h4>
-      <div class="chatbox" id="roomChatBox"></div>
-      <input type="text" id="roomMsg" placeholder="Type a message">
-      <button onclick="sendRoomMsg()">Send</button>
-    </div>
-  </div>
+<!-- Friends Tab -->
+<div id="friends" class="content active">
+<h3>Friends</h3>
+<input type="text" id="searchUser" placeholder="Search username">
+<button onclick="searchUser()">Search</button>
+<div id="searchResults"></div>
+<h4>Requests</h4><div id="friendRequests"></div>
+<h4>Your Friends</h4><div id="friendsList"></div>
+</div>
 
-  <!-- DMs Tab -->
-  <div id="dms" class="content">
-    <h3>Direct Messages</h3>
-    <div id="dmList"></div>
-    <div id="dmChat" style="display:none;">
-      <h4 id="dmTitle"></h4>
-      <div class="chatbox" id="dmChatBox"></div>
-      <input type="text" id="dmMsg" placeholder="Type a message">
-      <button onclick="sendDmMsg()">Send</button>
-    </div>
-  </div>
+<!-- Rooms Tab -->
+<div id="rooms" class="content">
+<h3>Rooms</h3>
+<input type="text" id="roomName" placeholder="Room name">
+<input type="password" id="roomPassword" placeholder="Password (optional)">
+<label><input type="checkbox" id="inviteOnly"> Invite Only</label>
+<button onclick="createRoom()">Create Room</button>
+<div id="inviteBox"></div>
+<h4>Available Rooms</h4><div id="roomsList"></div>
+<div id="roomChat" style="display:none;">
+<h4 id="roomTitle"></h4>
+<div class="chatbox" id="roomChatBox"></div>
+<input type="text" id="roomMsg" placeholder="Type a message">
+<button onclick="sendRoomMsg()">Send</button>
+</div>
+</div>
 
-  <script>
-    const socket = io();
-    let currentUser = null;
-    let currentRoom = null;
-    let currentDm = null;
+<!-- DMs Tab -->
+<div id="dms" class="content">
+<h3>Direct Messages</h3>
+<div id="dmList"></div>
+<div id="dmChat" style="display:none;">
+<h4 id="dmTitle"></h4>
+<div class="chatbox" id="dmChatBox"></div>
+<input type="text" id="dmMsg" placeholder="Type a message">
+<button onclick="sendDmMsg()">Send</button>
+</div>
+</div>
 
-    async function init() {
-      const res = await fetch("/me");
-      const data = await res.json();
-      if (!data.loggedIn) {
-        window.location.href = "/login.html";
-        return;
-      }
-      currentUser = data.username;
-      document.getElementById("welcome").innerText = `Welcome, ${currentUser}`;
-      socket.emit("registerUser", currentUser);
-      loadFriends();
-      loadRooms();
-    }
+<script>
+const socket = io();
+let currentUser=null,currentRoom=null,currentDm=null,isAdmin=false;
 
-    function switchTab(tab) {
-      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-      document.querySelectorAll(".content").forEach(c => c.classList.remove("active"));
-      document.querySelector(`.tab[onclick="switchTab('${tab}')"]`).classList.add("active");
-      document.getElementById(tab).classList.add("active");
-    }
+async function init(){
+  const res=await fetch("/me");
+  const data=await res.json();
+  if(!data.loggedIn){window.location.href="/login.html";return;}
+  currentUser=data.username;
+  document.getElementById("welcome").innerText=`Welcome, ${currentUser}`;
+  isAdmin=data.admin;
+  if(isAdmin){
+    const btn=document.getElementById("adminBtn");
+    btn.style.display="inline-block";
+    btn.onclick=()=>window.location.href="/admin";
+  }
+  socket.emit("registerUser",currentUser);
+  loadFriends();
+  loadRooms();
+}
 
-    async function searchUser() {
-      const user = document.getElementById("searchUser").value.trim();
-      if (!user || user === currentUser) {
-        document.getElementById("searchResults").innerText = "Invalid search";
-        return;
-      }
-      if (!user) return;
-      const res = await fetch("/me");
-      const data = await res.json();
-      if (data.username === user) {
-        document.getElementById("searchResults").innerText = "You can’t add yourself.";
-        return;
-      }
-      if (!user) return;
-      document.getElementById("searchResults").innerHTML = `
-        <div class="friend">
-          <span>${user}</span>
-          <button onclick="sendFriendRequest('${user}')">Add Friend</button>
-        </div>`;
-    }
+function switchTab(tab){
+  document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
+  document.querySelectorAll(".content").forEach(c=>c.classList.remove("active"));
+  document.querySelector(`.tab[onclick="switchTab('${tab}')"]`).classList.add("active");
+  document.getElementById(tab).classList.add("active");
+}
 
-    async function sendFriendRequest(to) {
-      const res = await fetch("/friend-request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to })
-      });
-      const data = await res.json();
-      alert(data.success ? "Request sent!" : data.message || "Error");
-    }
+async function searchUser(){
+  const user=document.getElementById("searchUser").value.trim();
+  if(!user || user===currentUser){document.getElementById("searchResults").innerText="Invalid search";return;}
+  document.getElementById("searchResults").innerHTML=`<div class="friend"><span>${user}</span><button onclick="sendFriendRequest('${user}')">Add Friend</button></div>`;
+}
 
-    async function loadFriends() {
-      const res = await fetch("/friends");
-      const data = await res.json();
-      const reqsDiv = document.getElementById("friendRequests");
-      reqsDiv.innerHTML = "";
-      data.requests.forEach(r => {
-        reqsDiv.innerHTML += `<div class="friend"><span>${r}</span><button onclick="acceptRequest('${r}')">Accept</button></div>`;
-      });
-      const listDiv = document.getElementById("friendsList");
-      listDiv.innerHTML = "";
-      data.friends.forEach(f => {
-        listDiv.innerHTML += `<div class="friend"><span>${f}</span></div>`;
-        document.getElementById("dmList").innerHTML += `<div class="dm" onclick="openDm('${f}')"><span>${f}</span></div>`;
-      });
-    }
+async function sendFriendRequest(to){
+  const res=await fetch("/friend-request",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({to})});
+  const data=await res.json();
+  alert(data.success?"Request sent!":data.message||"Error");
+  loadFriends();
+}
 
-    async function acceptRequest(from) {
-      await fetch("/accept-request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from })
-      });
-      loadFriends();
-    }
+async function loadFriends(){
+  const res=await fetch("/friends");
+  const data=await res.json();
+  const reqsDiv=document.getElementById("friendRequests"); reqsDiv.innerHTML="";
+  data.requests.forEach(r=>reqsDiv.innerHTML+=`<div class="friend"><span>${r}</span><button onclick="acceptRequest('${r}')">Accept</button></div>`);
+  const listDiv=document.getElementById("friendsList"); listDiv.innerHTML="";
+  data.friends.forEach(f=>{
+    listDiv.innerHTML+=`<div class="friend"><span>${f}</span></div>`;
+    document.getElementById("dmList").innerHTML+=`<div class="dm" onclick="openDm('${f}')"><span>${f}</span></div>`;
+  });
+}
 
-    async function createRoom() {
-      const name = document.getElementById("roomName").value;
-      const password = document.getElementById("roomPassword").value;
-      const inviteOnly = document.getElementById("inviteOnly").checked;
-      const res = await fetch("/create-room", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, password, inviteOnly })
-      });
-      const data = await res.json();
-      if (data.success) {
-        document.getElementById("inviteBox").innerHTML = `
-          <input type="text" value="${data.inviteLink}" readonly>`;
-        loadRooms();
-      }
-    }
+async function acceptRequest(from){
+  await fetch("/accept-request",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({from})});
+  loadFriends();
+}
 
-    async function loadRooms() {
-      const res = await fetch("/rooms");
-      const data = await res.json();
-      const listDiv = document.getElementById("roomsList");
-      listDiv.innerHTML = "";
-      Object.entries(data).forEach(([id, r]) => {
-        listDiv.innerHTML += `<div class="room" onclick="joinRoom('${id}', '${r.name}')">${r.name}</div>`;
-      });
-    }
+async function createRoom(){
+  const name=document.getElementById("roomName").value;
+  const password=document.getElementById("roomPassword").value;
+  const inviteOnly=document.getElementById("inviteOnly").checked;
+  const res=await fetch("/create-room",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,password,inviteOnly})});
+  const data=await res.json();
+  if(data.success){document.getElementById("inviteBox").innerHTML=`<input type="text" value="${data.inviteLink}" readonly>`;}
+  else alert(data.message);
+  loadRooms();
+}
 
-    function joinRoom(id, name) {
-      currentRoom = id;
-      document.getElementById("roomTitle").innerText = name;
-      document.getElementById("roomChat").style.display = "block";
-      document.getElementById("roomChatBox").innerHTML = "";
-      socket.emit("joinRoom", { roomId: id, username: currentUser });
-    }
+async function loadRooms(){
+  const res=await fetch("/rooms");
+  const data=await res.json();
+  const listDiv=document.getElementById("roomsList"); listDiv.innerHTML="";
+  Object.entries(data).forEach(([id,r])=>{ listDiv.innerHTML+=`<div class="room" onclick="joinRoom('${id}','${r.name}')">${r.name}</div>`; });
+}
 
-    function sendRoomMsg() {
-      const msg = document.getElementById("roomMsg").value;
-      if (!msg) return;
-      socket.emit("roomMessage", { roomId: currentRoom, username: currentUser, message: msg });
-      document.getElementById("roomMsg").value = "";
-    }
+function joinRoom(id,name){
+  currentRoom=id;
+  document.getElementById("roomTitle").innerText=name;
+  document.getElementById("roomChat").style.display="block";
+  document.getElementById("roomChatBox").innerHTML="";
+  socket.emit("joinRoom",{roomId:id,username:currentUser});
+}
 
-    socket.on("chatHistory", msgs => {
-      const box = document.getElementById("roomChatBox");
-      msgs.forEach(m => {
-        box.innerHTML += `<div class="message"><b>${m.username}:</b> ${m.message}</div>`;
-      });
-    });
+function sendRoomMsg(){
+  const msg=document.getElementById("roomMsg").value;
+  if(!msg) return;
+  socket.emit("roomMessage",{roomId:currentRoom,username:currentUser,message:msg});
+  document.getElementById("roomMsg").value="";
+}
 
-    socket.on("roomMessage", msg => {
-      const box = document.getElementById("roomChatBox");
-      box.innerHTML += `<div class="message"><b>${msg.username}:</b> ${msg.message}</div>`;
-      box.scrollTop = box.scrollHeight;
-    });
+socket.on("chatHistory",msgs=>renderMessages(msgs));
+socket.on("roomMessage",msg=>renderMessage(msg));
+socket.on("updateMessage",msg=>{
+  const el=document.getElementById(msg.id); if(el) el.querySelector(".text").innerText=msg.message;
+});
+socket.on("deleteMessage",msgId=>{
+  const el=document.getElementById(msgId); if(el) el.remove();
+});
 
-    function openDm(friend) {
-      currentDm = friend;
-      document.getElementById("dmTitle").innerText = `Chat with ${friend}`;
-      document.getElementById("dmChat").style.display = "block";
-      loadDmMessages(friend);
-    }
+function renderMessages(msgs){
+  const box=document.getElementById("roomChatBox"); box.innerHTML="";
+  msgs.forEach(renderMessage);
+}
+function renderMessage(msg){
+  const box=document.getElementById("roomChatBox");
+  const div=document.createElement("div");
+  div.className="message"; div.id=msg.id;
+  const controls=[];
+  if(msg.sender===currentUser || isAdmin){
+    controls.push(`<button onclick="editMessage('${msg.id}')">Edit</button>`);
+    controls.push(`<button onclick="deleteMessage('${msg.id}')">Delete</button>`);
+  }
+  div.innerHTML=`<b>${msg.sender}:</b> <span class="text">${msg.message}</span> ${controls.join(" ")}`;
+  box.appendChild(div);
+  box.scrollTop=box.scrollHeight;
+}
 
-    async function loadDmMessages(friend) {
-      const res = await fetch(`/dm/${friend}`);
-      const data = await res.json();
-      const box = document.getElementById("dmChatBox");
-      box.innerHTML = "";
-      if (data.success) {
-        data.messages.forEach(m => {
-          box.innerHTML += `<div class="message"><b>${m.sender}:</b> ${m.message}</div>`;
-        });
-      }
-    }
+async function editMessage(msgId){
+  const newMsg=prompt("Edit message:");
+  if(!newMsg) return;
+  await fetch("/edit-message",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({roomId:currentRoom,msgId,newMsg})});
+}
 
-    function sendDmMsg() {
-      const msg = document.getElementById("dmMsg").value;
-      if (!msg) return;
-      socket.emit("dmMessage", { to: currentDm, from: currentUser, message: msg });
-      document.getElementById("dmMsg").value = "";
-    }
+async function deleteMessage(msgId){
+  await fetch("/delete-message",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({roomId:currentRoom,msgId})});
+}
 
-    socket.on("dmMessage", msg => {
-      if (msg.sender === currentDm || msg.sender === currentUser) {
-        const box = document.getElementById("dmChatBox");
-        box.innerHTML += `<div class="message"><b>${msg.sender}:</b> ${msg.message}</div>`;
-        box.scrollTop = box.scrollHeight;
-      }
-    });
+function openDm(friend){
+  currentDm=friend;
+  document.getElementById("dmTitle").innerText=`Chat with ${friend}`;
+  document.getElementById("dmChat").style.display="block";
+  loadDmMessages(friend);
+}
 
-    function logout() {
-      window.location.href = "/login.html";
-    }
+async function loadDmMessages(friend){
+  const res=await fetch(`/dm/${friend}`);
+  const data=await res.json();
+  const box=document.getElementById("dmChatBox"); box.innerHTML="";
+  if(data.success) data.messages.forEach(m=>{ box.innerHTML+=`<div class="message"><b>${m.sender}:</b> ${m.message}</div>`; });
+}
 
-    init();
-  </script>
+function sendDmMsg(){
+  const msg=document.getElementById("dmMsg").value;
+  if(!msg) return;
+  socket.emit("dmMessage",{to:currentDm,from:currentUser,message:msg});
+  document.getElementById("dmMsg").value="";
+}
+
+function logout(){fetch("/logout",{method:"POST"}).then(()=>window.location.href="/login.html");}
+
+init();
+</script>
 </body>
 </html>
