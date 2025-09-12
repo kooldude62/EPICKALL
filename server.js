@@ -1,15 +1,16 @@
+// server.js
 import express from "express";
 import session from "express-session";
 import bcrypt from "bcryptjs";
-import multer from "multer";
-import path from "path";
-import { fileURLToPath } from "url";
-import { Low } from "lowdb";
-import { JSONFile } from "lowdb/node";
 import { Server } from "socket.io";
 import http from "http";
-import { v4 as uuidv4 } from "uuid";
+import path from "path";
+import multer from "multer";
+import { Low } from "lowdb";
+import { JSONFile } from "lowdb/node";
+import { fileURLToPath } from "url";
 
+// __dirname fix for ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -17,154 +18,137 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Middleware
-app.use(express.static(path.join(__dirname, "public")));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(session({
-  secret: "supersecretkey",
-  resave: false,
-  saveUninitialized: false
-}));
-
-// DB
-const file = path.join(__dirname, "db.json");
-const adapter = new JSONFile(file);
-const db = new Low(adapter);
+// === Database setup ===
+const adapter = new JSONFile(path.join(__dirname, "db.json"));
+const db = new Low(adapter, { users: [], messages: [] });
 
 await db.read();
-db.data = db.data || { users: [], rooms: {}, messages: {} };
+db.data ||= { users: [], messages: [] };
 await db.write();
 
-// Avatar upload
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, path.join(__dirname, "public/avatars")),
-  filename: (req, file, cb) =>
-    cb(null, `${req.session.user}_${Date.now()}${path.extname(file.originalname)}`)
-});
-const upload = multer({ storage });
+// === Middleware ===
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, "public")));
+app.use(
+  session({
+    secret: "supersecret",
+    resave: false,
+    saveUninitialized: true,
+  })
+);
 
-// --- Auth Routes ---
+// Multer for profile picture uploads
+const upload = multer({ dest: path.join(__dirname, "public/uploads/") });
+
+// === Helper functions ===
+async function getUser(username) {
+  await db.read();
+  return db.data.users.find((u) => u.username === username);
+}
+
+async function saveUser(user) {
+  await db.read();
+  db.data.users.push(user);
+  await db.write();
+}
+
+// === Routes ===
 
 // Signup
 app.post("/signup", async (req, res) => {
   const { username, password } = req.body;
-  if (!username || !password) return res.status(400).send("Missing fields");
+  if (!username || !password)
+    return res.status(400).send("Missing fields");
 
-  const exists = db.data.users.find(u => u.username === username);
-  if (exists) return res.status(400).send("Username taken");
+  const existing = await getUser(username);
+  if (existing) return res.status(400).send("Username already exists");
 
-  const hash = await bcrypt.hash(password, 10);
-  db.data.users.push({
-    username,
-    password: hash,
-    avatar: "/avatars/default.png"
-  });
-  await db.write();
+  const hashed = await bcrypt.hash(password, 10);
+  await saveUser({ username, password: hashed, pfp: "/default.png" });
 
   req.session.user = username;
-  res.send({ success: true });
+  res.send("OK");
 });
 
 // Login
 app.post("/login", async (req, res) => {
   const { username, password } = req.body;
-  const user = db.data.users.find(u => u.username === username);
-  if (!user) return res.status(400).send("Invalid username");
+  if (!username || !password)
+    return res.status(400).send("Missing fields");
+
+  const user = await getUser(username);
+  if (!user) return res.status(400).send("Invalid credentials");
 
   const match = await bcrypt.compare(password, user.password);
-  if (!match) return res.status(400).send("Invalid password");
+  if (!match) return res.status(400).send("Invalid credentials");
 
   req.session.user = username;
-  res.send({ success: true });
+  res.send("OK");
 });
 
 // Logout
 app.post("/logout", (req, res) => {
   req.session.destroy(() => {});
-  res.send({ success: true });
+  res.send("OK");
 });
 
-// Account info
-app.get("/account", (req, res) => {
-  if (!req.session.user) return res.status(401).send("Not logged in");
-  const user = db.data.users.find(u => u.username === req.session.user);
-  res.send({ username: user.username, avatar: user.avatar });
-});
-
-// Update avatar
-app.post("/account/avatar", upload.single("avatar"), async (req, res) => {
+// Get account info
+app.get("/account", async (req, res) => {
   if (!req.session.user) return res.status(401).send("Not logged in");
 
-  const user = db.data.users.find(u => u.username === req.session.user);
+  const user = await getUser(req.session.user);
   if (!user) return res.status(404).send("User not found");
 
-  user.avatar = "/avatars/" + req.file.filename;
+  res.json({ username: user.username, pfp: user.pfp });
+});
+
+// Update profile picture
+app.post("/update-pfp", upload.single("pfp"), async (req, res) => {
+  if (!req.session.user) return res.status(401).send("Not logged in");
+
+  await db.read();
+  const user = db.data.users.find((u) => u.username === req.session.user);
+  if (!user) return res.status(404).send("User not found");
+
+  if (req.file) user.pfp = "/uploads/" + req.file.filename;
   await db.write();
 
-  res.send({ success: true, avatar: user.avatar });
+  res.send("OK");
 });
 
-// --- Room Routes ---
-app.get("/rooms", (req, res) => {
-  if (!req.session.user) return res.status(401).send("Not logged in");
-  res.send(Object.keys(db.data.rooms));
-});
-
-app.post("/rooms", async (req, res) => {
-  if (!req.session.user) return res.status(401).send("Not logged in");
-  const { room } = req.body;
-  if (!room) return res.status(400).send("Room required");
-
-  if (!db.data.rooms[room]) {
-    db.data.rooms[room] = { creator: req.session.user };
-    db.data.messages[room] = [];
-    await db.write();
-  }
-  res.send({ success: true });
-});
-
-// --- Socket.io Chat ---
+// === Chat with Socket.IO ===
 io.on("connection", (socket) => {
-  let currentRoom = null;
-  let username = null;
+  console.log("New client connected");
 
-  socket.on("joinRoom", ({ room, user }) => {
-    username = user;
-    currentRoom = room;
-    socket.join(room);
+  socket.on("chat message", async (msg) => {
+    // msg = { username, text }
+    if (!msg || !msg.username || !msg.text) return;
 
-    socket.emit("history", db.data.messages[room] || []);
-  });
+    const user = await getUser(msg.username);
+    if (!user) return;
 
-  socket.on("message", async (text) => {
-    if (!currentRoom || !username) return;
-    const message = {
-      id: uuidv4(),
-      user: username,
-      text,
-      timestamp: Date.now()
+    const chatMsg = {
+      username: user.username,
+      text: msg.text,
+      pfp: user.pfp,
+      time: new Date().toISOString(),
     };
-    db.data.messages[currentRoom].push(message);
+
+    await db.read();
+    db.data.messages.push(chatMsg);
     await db.write();
-    io.to(currentRoom).emit("message", message);
+
+    io.emit("chat message", chatMsg);
   });
 
-  socket.on("deleteMessage", async (id) => {
-    if (!currentRoom) return;
-    const room = db.data.rooms[currentRoom];
-    const msg = db.data.messages[currentRoom].find(m => m.id === id);
-    if (!msg) return;
-
-    if (msg.user === username || room.creator === username) {
-      db.data.messages[currentRoom] =
-        db.data.messages[currentRoom].filter(m => m.id !== id);
-      await db.write();
-      io.to(currentRoom).emit("deleteMessage", id);
-    }
+  socket.on("disconnect", () => {
+    console.log("Client disconnected");
   });
 });
 
-server.listen(process.env.PORT || 3000, () => {
-  console.log("Server running");
+// === Start server ===
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log("Server running on port " + PORT);
 });
