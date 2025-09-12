@@ -1,88 +1,65 @@
 import express from "express";
 import session from "express-session";
+import multer from "multer";
 import bcrypt from "bcryptjs";
-import http from "http";
-import { Server } from "socket.io";
+import fs from "fs";
+import path from "path";
 
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
-
+const app=express();
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(session({
-  secret: "supersecretkey",
-  resave: false,
-  saveUninitialized: false
-}));
-
-// In-memory storage (replace with GitHub storage if needed)
-let users = []; // {username, passwordHash}
-let rooms = []; // {name, passwordHash, messages: []}
-
-// Serve static files
 app.use(express.static("public"));
+app.use(session({secret:"secret",resave:false,saveUninitialized:true}));
 
-// -------- Auth routes --------
-app.post("/signup", async (req, res) => {
-  const { username, password } = req.body;
-  if(users.find(u => u.username===username)) return res.status(400).send("Username taken");
-  const hash = await bcrypt.hash(password, 10);
-  users.push({username,passwordHash:hash});
+const accountsFile="./accounts.json";
+if(!fs.existsSync(accountsFile)) fs.writeFileSync(accountsFile,"[]");
+const upload=multer({dest:"uploads/"});
+
+function getAccounts(){ return JSON.parse(fs.readFileSync(accountsFile,"utf-8")); }
+function saveAccounts(data){ fs.writeFileSync(accountsFile, JSON.stringify(data,null,2)); }
+
+// Signup
+app.post("/signup", upload.single("pfp"), async (req,res)=>{
+  const {username,password}=req.body;
+  const accounts=getAccounts();
+  if(accounts.find(a=>a.username===username)) return res.status(400).send("Username taken");
+  let pfp="";
+  if(req.file) pfp="/uploads/"+req.file.filename;
+  accounts.push({username,password:await bcrypt.hash(password,10),pfp});
+  saveAccounts(accounts);
   req.session.user=username;
-  res.sendStatus(200);
+  res.send("OK");
 });
 
-app.post("/login", async (req, res) => {
-  const { username, password } = req.body;
-  const user = users.find(u=>u.username===username);
-  if(!user) return res.status(401).send("Invalid credentials");
-  const ok = await bcrypt.compare(password,user.passwordHash);
-  if(!ok) return res.status(401).send("Invalid credentials");
+// Login
+app.post("/login", async (req,res)=>{
+  const {username,password}=req.body;
+  const accounts=getAccounts();
+  const user=accounts.find(a=>a.username===username);
+  if(!user) return res.status(400).send("Invalid username");
+  const match=await bcrypt.compare(password,user.password);
+  if(!match) return res.status(400).send("Invalid password");
   req.session.user=username;
-  res.sendStatus(200);
+  res.send("OK");
 });
 
-app.post("/logout",(req,res)=>{
-  req.session.destroy(()=>res.sendStatus(200));
+// Logout
+app.post("/logout",(req,res)=>{ req.session.destroy(()=>{}); res.send("OK"); });
+
+// Get account
+app.get("/account",(req,res)=>{
+  if(!req.session.user) return res.status(401).send("Not logged in");
+  const user=getAccounts().find(a=>a.username===req.session.user);
+  res.json({username:user.username,pfp:user.pfp});
 });
 
-// -------- Room routes --------
-app.get("/rooms",(req,res)=>{
-  if(!req.session.user) return res.sendStatus(401);
-  res.json(rooms.map(r=>({name:r.name, hasPassword:!!r.passwordHash})));
+// Update PFP
+app.post("/update-pfp",upload.single("pfp"),(req,res)=>{
+  if(!req.session.user) return res.status(401).send("Not logged in");
+  const accounts=getAccounts();
+  const user=accounts.find(a=>a.username===req.session.user);
+  if(req.file) user.pfp="/uploads/"+req.file.filename;
+  saveAccounts(accounts);
+  res.send("OK");
 });
 
-app.post("/create-room", async (req,res)=>{
-  if(!req.session.user) return res.sendStatus(401);
-  const { roomName, roomPassword } = req.body;
-  if(rooms.find(r=>r.name===roomName)) return res.status(400).send("Room already exists");
-  const hash = roomPassword ? await bcrypt.hash(roomPassword,10) : null;
-  rooms.push({name:roomName,passwordHash:hash,messages:[]});
-  res.sendStatus(200);
-});
-
-// -------- Socket.io --------
-io.on("connection",(socket)=>{
-  socket.on("join-room", async ({roomName, roomPassword, username})=>{
-    const room = rooms.find(r=>r.name===roomName);
-    if(!room) return socket.emit("error","Room not found");
-    if(room.passwordHash){
-      const ok = await bcrypt.compare(roomPassword,room.passwordHash);
-      if(!ok) return socket.emit("error","Wrong password");
-    }
-    socket.join(roomName);
-    socket.emit("history", room.messages);
-  });
-
-  socket.on("message", ({roomName,user,text})=>{
-    const room = rooms.find(r=>r.name===roomName);
-    if(!room) return;
-    const msg = {user,text};
-    room.messages.push(msg);
-    io.to(roomName).emit("message", msg);
-  });
-});
-
-// -------- Start server --------
-server.listen(3000,()=>console.log("Server running on http://localhost:3000"));
+app.listen(3000,()=>console.log("Server running"));
