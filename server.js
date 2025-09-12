@@ -44,19 +44,28 @@ const upload = multer({ storage });
 
 // Signup
 app.post("/signup", async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, avatar } = req.body;
+
   if (!username || !password) return res.status(400).send("Missing fields");
 
   const db = readDB();
-  if (db.users.find(u => u.username === username)) return res.status(400).send("Username exists");
+  if (db.users.find(u => u.username === username)) 
+      return res.status(400).send("Username exists");
 
   const hash = await bcrypt.hash(password, 10);
-  db.users.push({ username, password: hash, avatar: "/avatars/default.png" });
+
+  // Use provided avatar or default URL
+  const avatarUrl = avatar && avatar.trim() !== "" 
+      ? avatar 
+      : "https://openclipart.org/image/800px/346569";
+
+  db.users.push({ username, password: hash, avatar: avatarUrl });
   writeDB(db);
 
   req.session.user = username;
   res.send({ success: true });
 });
+
 
 // Login
 app.post("/login", async (req, res) => {
