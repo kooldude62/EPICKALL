@@ -1,165 +1,284 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <title>ChatApp</title>
-  <style>
-    body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-      background: #2b2d31;
-      color: #fff;
-      display: flex;
-      height: 100vh;
-    }
-    #sidebar {
-      width: 250px;
-      background: #1e1f22;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 15px;
-    }
-    #chat-container {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-    }
-    #messages {
-      flex: 1;
-      padding: 10px;
-      overflow-y: auto;
-      background: #313338;
-    }
-    #chat-input {
-      display: flex;
-      padding: 10px;
-      background: #1e1f22;
-    }
-    #chat-input input {
-      flex: 1;
-      padding: 10px;
-      border: none;
-      border-radius: 5px;
-      background: #404249;
-      color: #fff;
-    }
-    #chat-input button {
-      margin-left: 10px;
-      padding: 10px 15px;
-      border: none;
-      border-radius: 5px;
-      background: #5865f2;
-      color: #fff;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    #chat-input button:hover {
-      background: #4752c4;
-    }
-    .msg {
-      margin: 5px 0;
-    }
-    .system {
-      color: #aaa;
-      font-style: italic;
-    }
-    .welcome {
-      font-weight: bold;
-      margin-bottom: 10px;
-    }
-    .fade {
-      animation: fadeIn 0.3s ease;
-    }
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(5px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-  </style>
+  <meta charset="utf-8"/>
+  <title>Chat Home</title>
+  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div id="sidebar">
-    <div class="welcome">Welcome, <span id="username"></span></div>
-    <button onclick="openRoomConfig()">+ Create Room</button>
-    <div id="room-list"></div>
-  </div>
-  <div id="chat-container">
-    <div id="messages"></div>
-    <div id="chat-input">
-      <input id="msgBox" placeholder="Type a message..." />
-      <button onclick="sendMsg()">Send</button>
+<div id="app" class="app">
+  <div class="left">
+    <div class="welcome">
+      <div style="display:flex;flex-direction:column">
+        <div class="name" id="meName">@user</div>
+        <div class="small" id="meSub">online</div>
+      </div>
+    </div>
+
+    <div class="tabs" id="tabs">
+      <div class="tab active" data-tab="friends">Friends</div>
+      <div class="tab" data-tab="dms">DMs</div>
+      <div class="tab" data-tab="rooms">Rooms</div>
+    </div>
+
+    <div class="search">
+      <input id="searchInput" placeholder="Search users / rooms">
+    </div>
+
+    <div class="list" id="listArea"></div>
+
+    <div style="margin-top:auto;display:flex;gap:8px">
+      <button onclick="openAccount()">Account</button>
+      <button onclick="doLogout()" style="background:#333">Logout</button>
     </div>
   </div>
 
-  <div id="room-config" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:#0009; display:flex; align-items:center; justify-content:center;">
-    <div style="background:#1e1f22; padding:20px; border-radius:10px;">
-      <h3>Create Room</h3>
-      <input id="roomName" placeholder="Room name" /><br/><br/>
-      <input id="roomPass" placeholder="Password (optional)" /><br/><br/>
-      <label><input type="checkbox" id="roomPrivate"/> Private (invite only)</label><br/><br/>
+  <div class="center">
+    <div class="header">
+      <div class="roomTitle" id="roomTitle">No chat selected</div>
+      <div style="display:flex;gap:10px">
+        <button id="btnCreateRoom" onclick="openCreateModal()">Create</button>
+      </div>
+    </div>
+
+    <div class="messages" id="messages"></div>
+
+    <div class="inputBar">
+      <input id="msgInput" placeholder="Message..." onkeydown="if(event.key==='Enter') sendMessage()">
+      <button onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+</div>
+
+<!-- create room modal -->
+<div class="modal" id="modalCreate">
+  <div class="card">
+    <h3>Create Room</h3>
+    <div class="kv">
+      <input id="newRoomName" placeholder="Room name">
+      <input id="newRoomPass" placeholder="Password (optional)">
+      <label><input type="checkbox" id="newInviteOnly"> Invite only (hide from list)</label>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
       <button onclick="createRoom()">Create</button>
-      <button onclick="closeRoomConfig()">Cancel</button>
+      <button onclick="closeCreateModal()">Cancel</button>
     </div>
   </div>
+</div>
 
-  <script src="/socket.io/socket.io.js"></script>
-  <script>
-    const socket = io();
-    let currentRoom = null;
-    let username = "<%= user %>"; // will be filled server-side if templated
+<!-- account modal -->
+<div class="modal" id="modalAccount">
+  <div class="card">
+    <h3>Account</h3>
+    <div class="kv">
+      <input id="accUsername" placeholder="Change username">
+      <input id="accPfp" placeholder="PFP URL">
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="saveAccount()">Save</button>
+      <button onclick="closeAccount()">Close</button>
+    </div>
+  </div>
+</div>
 
-    document.getElementById("username").innerText = username;
+<script src="/socket.io/socket.io.js"></script>
+<script>
+(async function init(){
+  // ensure logged in
+  const me = await fetch('/me');
+  if(me.status===401){ location.href='/login.html'; return; }
+  const meJson = await me.json();
+  document.getElementById('meName').innerText = '@'+meJson.username;
+  window.ME = meJson.username;
+  loadTabList('friends');
+  setupTabs();
+  startSocket();
+})();
 
-    function openRoomConfig() {
-      document.getElementById("room-config").style.display = "flex";
+function setupTabs(){
+  document.querySelectorAll('.tab').forEach(t=>{
+    t.onclick = () => {
+      document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+      t.classList.add('active');
+      loadTabList(t.dataset.tab);
     }
-    function closeRoomConfig() {
-      document.getElementById("room-config").style.display = "none";
-    }
+  });
+  document.getElementById('searchInput').addEventListener('input', (e)=>{
+    const active = document.querySelector('.tab.active').dataset.tab;
+    loadTabList(active, e.target.value);
+  });
+}
 
-    function createRoom() {
-      const room = document.getElementById("roomName").value;
-      const password = document.getElementById("roomPass").value;
-      const privateRoom = document.getElementById("roomPrivate").checked;
-      socket.emit("createRoom", { room, password, privateRoom, user: username });
-      closeRoomConfig();
+/* LOAD lists depending on tab */
+async function loadTabList(tab, q=''){
+  const list = document.getElementById('listArea');
+  list.innerHTML = '';
+  if(tab==='friends'){
+    // show incoming requests and search
+    const req = await fetch('/friend/requests'); if(req.ok){
+      const r = await req.json();
+      if(r.length){
+        const head = document.createElement('div'); head.className='small'; head.style.margin='6px 0'; head.innerText='Requests';
+        list.appendChild(head);
+        r.forEach(reqi=>{
+          const el = document.createElement('div'); el.className='item';
+          el.innerHTML = `<div class="avatar"></div><div style="flex:1"><b>${reqi.from}</b><div class="small">requested</div></div><div><button onclick="respond('${reqi.id}',true)">Accept</button><button onclick="respond('${reqi.id}',false)" style="background:#333">Decline</button></div>`;
+          list.appendChild(el);
+        });
+      }
     }
-
-    function sendMsg() {
-      const msg = document.getElementById("msgBox").value;
-      if (!msg) return;
-      socket.emit("chatMessage", { room: currentRoom, user: username, msg });
-      document.getElementById("msgBox").value = "";
-    }
-
-    socket.on("roomJoined", (room) => {
-      currentRoom = room;
-      addSystem(`Joined room: ${room}`);
+    // search users
+    const ures = await fetch('/users?q=' + encodeURIComponent(q||''));
+    const users = await ures.json();
+    users.forEach(u=>{
+      const el = document.createElement('div'); el.className='item';
+      el.innerHTML = `<div class="avatar" style="background-image:url('${u.pfp}');background-size:cover"></div><div style="flex:1"><b>${u.username}</b></div><div><button onclick="sendFR('${u.username}')">Add</button></div>`;
+      list.appendChild(el);
     });
-
-    socket.on("systemMsg", (text) => {
-      addSystem(text);
+  } else if(tab==='dms'){
+    const res = await fetch('/dms'); const listd = await res.json();
+    listd.forEach(f=>{
+      const el = document.createElement('div'); el.className='item';
+      el.innerHTML = `<div class="avatar" style="background-image:url('${f.pfp}');background-size:cover"></div><div style="flex:1"><b>${f.username}</b></div>`;
+      el.onclick = ()=> openDM(f.username);
+      list.appendChild(el);
     });
-
-    socket.on("chatMessage", ({ user, msg }) => {
-      addMsg(user, msg);
+  } else if(tab==='rooms'){
+    const rres = await fetch('/rooms'); const rooms = await rres.json();
+    rooms.concat([]).forEach(r=>{
+      const el = document.createElement('div'); el.className='item';
+      el.innerHTML = `<div style="width:36px;height:36px;border-radius:8px;background:#222;display:inline-block;margin-right:8px"></div><div style="flex:1"><b>${r.name}</b><div class="small">${r.private? 'Password' : 'Public'}</div></div><div><button onclick="joinRoom('${r.name}')">Join</button></div>`;
+      list.appendChild(el);
     });
+  }
+}
 
-    function addMsg(user, msg) {
-      const div = document.createElement("div");
-      div.className = "msg fade";
-      div.innerHTML = `<b>${user}:</b> ${msg}`;
-      document.getElementById("messages").appendChild(div);
-      div.scrollIntoView();
-    }
+/* Friend request actions */
+async function sendFR(to){
+  await fetch('/friend/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({to})});
+  alert('Request sent');
+}
+async function respond(id, accept){
+  await fetch('/friend/respond',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,accept})});
+  loadTabList('friends');
+}
 
-    function addSystem(msg) {
-      const div = document.createElement("div");
-      div.className = "msg system fade";
-      div.innerText = msg;
-      document.getElementById("messages").appendChild(div);
-      div.scrollIntoView();
-    }
-  </script>
+/* Account modal */
+function openAccount(){ document.getElementById('modalAccount').classList.add('show'); }
+function closeAccount(){ document.getElementById('modalAccount').classList.remove('show'); }
+async function saveAccount(){
+  const newU = document.getElementById('accUsername').value.trim();
+  const pfp = document.getElementById('accPfp').value.trim();
+  if(!newU && !pfp){ closeAccount(); return; }
+  // simple update via /updateAccount not implemented as API - we'll call /updateAccount endpoint (POST form)
+  // Use fetch to POST form
+  const form = new FormData();
+  if(newU) form.append('username', newU);
+  if(pfp) form.append('pfp', pfp);
+  const res = await fetch('/updateAccount',{method:'POST',body: new URLSearchParams({username:newU, pfp})});
+  if(res.ok) { alert('Saved'); closeAccount(); location.reload(); }
+}
+
+/* create room modal */
+function openCreateModal(){ document.getElementById('modalCreate').classList.add('show');}
+function closeCreateModal(){ document.getElementById('modalCreate').classList.remove('show');}
+async function createRoom(){
+  const name = document.getElementById('newRoomName').value.trim();
+  const pass = document.getElementById('newRoomPass').value;
+  const inviteOnly = document.getElementById('newInviteOnly').checked;
+  if(!name) return alert('Name required');
+  const res = await fetch('/rooms/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,password:pass,inviteOnly})});
+  const j = await res.json();
+  if(j.ok){
+    closeCreateModal(); loadTabList('rooms');
+    if(j.inviteId) alert('Invite code: ' + j.inviteId + '\nInvite link: ' + location.origin + '/rooms/invite/' + j.inviteId);
+  } else alert('Error: ' + (j.error||''));
+}
+
+/* logout */
+async function doLogout(){ await fetch('/logout',{method:'POST'}); localStorage.removeItem('user'); location.href='/login.html' }
+
+/* socket.io realtime */
+let socket;
+function startSocket(){
+  socket = io({ autoConnect:true });
+  socket.emit('identify', window.ME);
+
+  socket.on('roomHistory', data=>{
+    document.getElementById('messages').innerHTML='';
+    data.history.forEach(m => addMessage(m.user, m.text, m.user===window.ME));
+    document.getElementById('roomTitle').innerText = 'Room: ' + data.room;
+  });
+
+  socket.on('roomMessage', m=>{
+    addMessage(m.user, m.text, m.user===window.ME);
+  });
+
+  socket.on('systemMsg', d=>{
+    addSystem(d.text);
+  });
+
+  socket.on('dmHistory', d=>{
+    document.getElementById('messages').innerHTML='';
+    d.history.forEach(m => addMessage(m.from, m.text, m.from===window.ME));
+    document.getElementById('roomTitle').innerText = 'DM: ' + d.withUser;
+  });
+
+  socket.on('dmMessage', m=>{
+    addMessage(m.from, m.text, m.from===window.ME);
+  });
+
+  socket.on('errorMsg', t=>alert(t));
+}
+
+/* helpers for messages */
+function addMessage(user, text, self=false){
+  const el = document.createElement('div'); el.className='message' + (self? ' you':'');
+  el.innerHTML = `<div style="display:flex;flex-direction:column"><div style="font-size:13px;color:#cfe1ff"><b>${user}</b> <span class="small" style="margin-left:8px;color:#9aa3b2">${new Date().toLocaleTimeString()}</span></div><div class="text">${escapeHtml(text)}</div></div>`;
+  document.getElementById('messages').appendChild(el);
+  el.scrollIntoView({behavior:'smooth',block:'end'});
+}
+function addSystem(text){
+  const el = document.createElement('div'); el.className='msg system';
+  el.style.color='#9aa3b2'; el.style.fontStyle='italic'; el.textContent = text;
+  document.getElementById('messages').appendChild(el); el.scrollIntoView();
+}
+function escapeHtml(s){ return s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+/* actions: join room, open DM, send message */
+async function joinRoom(name){
+  // ask for password if needed
+  const info = await (await fetch('/rooms/' + encodeURIComponent(name))).json();
+  let pass = '';
+  if(info.private || info.private===undefined){
+    pass = prompt('Password (leave empty if none):') || '';
+  }
+  socket.emit('joinRoomSocket',{ room:name, password:pass });
+}
+function openDM(user){
+  socket.emit('startDM',{ withUser:user });
+}
+function sendMessage(){
+  const v = document.getElementById('msgInput').value.trim();
+  if(!v) return;
+  const title = document.getElementById('roomTitle').innerText;
+  if(title.startsWith('Room: ')){
+    const room = title.slice(6);
+    socket.emit('sendRoomMessage',{ room, text: v });
+  } else if(title.startsWith('DM: ')){
+    const to = title.slice(4);
+    socket.emit('sendDM',{ to, text: v });
+  } else {
+    alert('Select a room or dm');
+  }
+  document.getElementById('msgInput').value='';
+}
+
+/* quick: auto-refresh rooms/friends when window focused */
+window.addEventListener('focus', ()=> {
+  const tab = document.querySelector('.tab.active').dataset.tab;
+  loadTabList(tab);
+});
+</script>
 </body>
 </html>
