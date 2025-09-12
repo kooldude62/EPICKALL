@@ -1,101 +1,165 @@
-import express from "express";
-import http from "http";
-import { Server } from "socket.io";
-import path from "path";
-import { fileURLToPath } from "url";
-import bcrypt from "bcryptjs";
-import session from "express-session";
-import cookieParser from "cookie-parser";
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ChatApp</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #2b2d31;
+      color: #fff;
+      display: flex;
+      height: 100vh;
+    }
+    #sidebar {
+      width: 250px;
+      background: #1e1f22;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+    #chat-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    #messages {
+      flex: 1;
+      padding: 10px;
+      overflow-y: auto;
+      background: #313338;
+    }
+    #chat-input {
+      display: flex;
+      padding: 10px;
+      background: #1e1f22;
+    }
+    #chat-input input {
+      flex: 1;
+      padding: 10px;
+      border: none;
+      border-radius: 5px;
+      background: #404249;
+      color: #fff;
+    }
+    #chat-input button {
+      margin-left: 10px;
+      padding: 10px 15px;
+      border: none;
+      border-radius: 5px;
+      background: #5865f2;
+      color: #fff;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #chat-input button:hover {
+      background: #4752c4;
+    }
+    .msg {
+      margin: 5px 0;
+    }
+    .system {
+      color: #aaa;
+      font-style: italic;
+    }
+    .welcome {
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+    .fade {
+      animation: fadeIn 0.3s ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <div id="sidebar">
+    <div class="welcome">Welcome, <span id="username"></span></div>
+    <button onclick="openRoomConfig()">+ Create Room</button>
+    <div id="room-list"></div>
+  </div>
+  <div id="chat-container">
+    <div id="messages"></div>
+    <div id="chat-input">
+      <input id="msgBox" placeholder="Type a message..." />
+      <button onclick="sendMsg()">Send</button>
+    </div>
+  </div>
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+  <div id="room-config" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:#0009; display:flex; align-items:center; justify-content:center;">
+    <div style="background:#1e1f22; padding:20px; border-radius:10px;">
+      <h3>Create Room</h3>
+      <input id="roomName" placeholder="Room name" /><br/><br/>
+      <input id="roomPass" placeholder="Password (optional)" /><br/><br/>
+      <label><input type="checkbox" id="roomPrivate"/> Private (invite only)</label><br/><br/>
+      <button onclick="createRoom()">Create</button>
+      <button onclick="closeRoomConfig()">Cancel</button>
+    </div>
+  </div>
 
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    let currentRoom = null;
+    let username = "<%= user %>"; // will be filled server-side if templated
 
-app.use(express.static(path.join(__dirname, "public")));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser());
-app.use(session({
-  secret: "supersecret",
-  resave: false,
-  saveUninitialized: false
-}));
+    document.getElementById("username").innerText = username;
 
-// "Database"
-let users = {};   // { username: { password: hashed, pfp: url } }
-let rooms = {};   // { roomName: { pass, private } }
+    function openRoomConfig() {
+      document.getElementById("room-config").style.display = "flex";
+    }
+    function closeRoomConfig() {
+      document.getElementById("room-config").style.display = "none";
+    }
 
-// Auth check
-function requireLogin(req, res, next) {
-  if (!req.session.user) return res.redirect("/login.html");
-  next();
-}
+    function createRoom() {
+      const room = document.getElementById("roomName").value;
+      const password = document.getElementById("roomPass").value;
+      const privateRoom = document.getElementById("roomPrivate").checked;
+      socket.emit("createRoom", { room, password, privateRoom, user: username });
+      closeRoomConfig();
+    }
 
-// Routes
-app.get("/", requireLogin, (req, res) => {
-  res.sendFile(path.join(__dirname, "public/index.html"));
-});
+    function sendMsg() {
+      const msg = document.getElementById("msgBox").value;
+      if (!msg) return;
+      socket.emit("chatMessage", { room: currentRoom, user: username, msg });
+      document.getElementById("msgBox").value = "";
+    }
 
-app.get("/account", requireLogin, (req, res) => {
-  res.sendFile(path.join(__dirname, "public/account.html"));
-});
+    socket.on("roomJoined", (room) => {
+      currentRoom = room;
+      addSystem(`Joined room: ${room}`);
+    });
 
-app.post("/signup", async (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password || users[username]) return res.send("Invalid signup.");
-  const hashed = await bcrypt.hash(password, 10);
-  users[username] = { password: hashed, pfp: "/default.png" };
-  req.session.user = username;
-  res.redirect("/");
-});
+    socket.on("systemMsg", (text) => {
+      addSystem(text);
+    });
 
-app.post("/login", async (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password || !users[username]) return res.send("Invalid login.");
-  const valid = await bcrypt.compare(password, users[username].password);
-  if (!valid) return res.send("Invalid login.");
-  req.session.user = username;
-  res.redirect("/");
-});
+    socket.on("chatMessage", ({ user, msg }) => {
+      addMsg(user, msg);
+    });
 
-app.post("/updateAccount", requireLogin, (req, res) => {
-  const { username, pfp } = req.body;
-  const current = req.session.user;
-  if (username && !users[username]) {
-    users[username] = users[current];
-    delete users[current];
-    req.session.user = username;
-  }
-  if (pfp) users[req.session.user].pfp = pfp;
-  res.redirect("/account");
-});
+    function addMsg(user, msg) {
+      const div = document.createElement("div");
+      div.className = "msg fade";
+      div.innerHTML = `<b>${user}:</b> ${msg}`;
+      document.getElementById("messages").appendChild(div);
+      div.scrollIntoView();
+    }
 
-// Socket.io
-io.on("connection", (socket) => {
-  console.log("User connected");
-
-  socket.on("createRoom", ({ room, password, privateRoom }) => {
-    if (!room) return;
-    rooms[room] = { pass: password || null, private: privateRoom || false };
-    socket.join(room);
-    socket.emit("roomJoined", room);
-  });
-
-  socket.on("joinRoom", ({ room, password }) => {
-    if (!rooms[room]) return socket.emit("errorMsg", "Room not found.");
-    if (rooms[room].pass && rooms[room].pass !== password) return socket.emit("errorMsg", "Wrong password.");
-    socket.join(room);
-    socket.emit("roomJoined", room);
-  });
-
-  socket.on("chatMessage", ({ room, user, msg }) => {
-    if (!room) return;
-    io.to(room).emit("chatMessage", { user, msg });
-  });
-});
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+    function addSystem(msg) {
+      const div = document.createElement("div");
+      div.className = "msg system fade";
+      div.innerText = msg;
+      document.getElementById("messages").appendChild(div);
+      div.scrollIntoView();
+    }
+  </script>
+</body>
+</html>
