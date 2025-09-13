@@ -1,252 +1,170 @@
 import express from "express";
+import session from "express-session";
+import bodyParser from "body-parser";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import bcrypt from "bcrypt";
-import bodyParser from "body-parser";
-import session from "express-session";
 import path from "path";
 import { fileURLToPath } from "url";
-import { dirname } from "path";
+import crypto from "crypto";
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname = path.dirname(__filename);
 
 const app = express();
-const http = createServer(app);
-const io = new Server(http);
+const httpServer = createServer(app);
+const io = new Server(httpServer);
 
-const users = {}; // { username: { passwordHash, friends: [], requests: [], avatar, banned: false } }
-const rooms = {}; // { roomId: { name, password, inviteOnly, messages: [] } }
-const dms = {};   // { "userA_userB": [{ id, sender, message, avatar, time }] }
-const adminIPs = ["127.0.0.1"]; // Admin IPs whitelist
-
-// Middleware
+app.use(express.static(path.join(__dirname, "public")));
 app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({
   secret: "supersecret",
   resave: false,
   saveUninitialized: false
 }));
-app.use(express.static(path.join(__dirname, "public")));
 
-function checkAuth(req, res, next){
-  if(!req.session.user) return res.redirect("/login.html");
-  if(users[req.session.user]?.banned) return res.send("You are banned");
+// --- In-memory storage ---
+const users = {}; // { username: { password, avatar, friends: [], createdAt } }
+const friendRequests = {}; // { username: [fromUser1, fromUser2] }
+const rooms = {}; // { roomId: { name, password, inviteOnly, users: [] } }
+const dms = {}; // { "userA_userB": [{ sender, message, avatar, id }] }
+
+// --- Auth middleware ---
+function checkAuth(req,res,next){
+  if(!req.session.user) return res.status(401).json({ loggedIn:false });
   next();
 }
-function checkAdmin(req, res, next){
-  if(!adminIPs.includes(req.ip)) return res.status(403).send("Forbidden");
-  next();
-}
 
-// --- Auth ---
-app.post("/signup", async (req, res)=>{
+// --- Auth routes ---
+app.post("/login", (req,res)=>{
   const { username, password } = req.body;
-  if(users[username]) return res.json({ success: false, message: "User exists" });
-  const passwordHash = await bcrypt.hash(password, 10);
-  users[username] = { 
-    passwordHash, 
-    friends: [], 
-    requests: [], 
-    avatar: `/avatars/${Math.floor(Math.random()*5)+1}.png`, 
-    banned: false 
-  };
-  req.session.user = username;
-  res.json({ success: true });
-});
-
-app.post("/login", async (req,res)=>{
-  const { username, password } = req.body;
-  if(!users[username]) return res.json({ success:false, message:"Invalid credentials" });
-  const valid = await bcrypt.compare(password, users[username].passwordHash);
-  if(!valid) return res.json({ success:false, message:"Invalid credentials" });
+  if(!users[username] || users[username].password !== password)
+    return res.json({ success:false, message:"Invalid credentials" });
   req.session.user = username;
   res.json({ success:true });
 });
 
-app.post("/logout",(req,res)=>{
-  req.session.destroy(err=>{
-    if(err) return res.json({ success:false });
-    res.json({ success:true });
-  });
+app.post("/signup", (req,res)=>{
+  const { username, password, avatar } = req.body;
+  if(users[username]) return res.json({ success:false, message:"Username taken" });
+  users[username] = { password, avatar: avatar || "/default.png", friends: [], createdAt: Date.now() };
+  friendRequests[username] = [];
+  req.session.user = username;
+  res.json({ success:true });
 });
 
-app.get("/me",(req,res)=>{
+app.post("/logout", (req,res)=>{
+  req.session.destroy(()=> res.json({ success:true }));
+});
+
+app.get("/me", (req,res)=>{
   if(!req.session.user) return res.json({ loggedIn:false });
-  res.json({ 
-    loggedIn:true, 
-    username:req.session.user, 
-    avatar: users[req.session.user].avatar, 
-    admin: adminIPs.includes(req.ip) 
-  });
+  const u = users[req.session.user];
+  res.json({ loggedIn:true, username:req.session.user, admin:u.admin||false });
 });
 
 // --- Friends ---
-app.post("/friend-request", (req,res)=>{
-  const from = req.session.user;
-  const to = req.body.to;
-  if(!from || !users[to]) return res.json({ success:false });
-  if(from===to) return res.json({ success:false, message:"You can’t friend yourself!" });
-  if(!users[to].requests.includes(from) && !users[to].friends.includes(from)){
-    users[to].requests.push(from);
-  }
+app.get("/friends", checkAuth, (req,res)=>{
+  const username = req.session.user;
+  const reqs = friendRequests[username] || [];
+  const friendsList = users[username].friends.map(f => ({
+    username:f,
+    avatar:users[f]?.avatar || '/default.png'
+  }));
+
+  // Get 10 most recently registered users, excluding self and existing friends
+  const recentUsers = Object.entries(users)
+    .filter(([name])=>name!==username && !users[username].friends.includes(name))
+    .sort((a,b)=>b[1].createdAt - a[1].createdAt)
+    .slice(0,10)
+    .map(([name,data])=>({ username:name, avatar:data.avatar || '/default.png' }));
+
+  res.json({ requests:reqs, friends:friendsList, recent:recentUsers });
+});
+
+app.post("/friend-request", checkAuth, (req,res)=>{
+  const { to } = req.body;
+  if(!users[to]) return res.json({ success:false, message:"User not found" });
+  if(users[req.session.user].friends.includes(to)) return res.json({ success:false, message:"Already friends" });
+  if(friendRequests[to].includes(req.session.user)) return res.json({ success:false, message:"Already requested" });
+  friendRequests[to].push(req.session.user);
   res.json({ success:true });
 });
 
-app.get("/friends",(req,res)=>{
-  const user = req.session.user;
-  const data = {
-    friends: users[user]?.friends.map(f => ({
-      username: f,
-      avatar: users[f]?.avatar || "/default.png"
-    })) || [],
-    requests: users[user]?.requests.map(r => ({
-      username: r,
-      avatar: users[r]?.avatar || "/default.png"
-    })) || []
-  };
-  res.json(data);
-});
-
-app.post("/accept-request",(req,res)=>{
-  const user = req.session.user;
-  const from = req.body.from;
-  if(users[user] && users[from]){
-    users[user].friends.push(from);
-    users[from].friends.push(user);
-    users[user].requests = users[user].requests.filter(r=>r!==from);
+app.post("/accept-request", checkAuth, (req,res)=>{
+  const { from } = req.body;
+  const username = req.session.user;
+  const idx = friendRequests[username].indexOf(from);
+  if(idx>-1){
+    friendRequests[username].splice(idx,1);
+    users[username].friends.push(from);
+    users[from].friends.push(username);
   }
   res.json({ success:true });
 });
 
 // --- Rooms ---
-app.post("/create-room", (req,res)=>{
-  const { name, password, inviteOnly } = req.body;
-  for(const r of Object.values(rooms)){
-    if(r.name.toLowerCase()===name.toLowerCase()) return res.json({ success:false, message:"Room name exists" });
+app.get("/rooms", checkAuth, (req,res)=>{
+  const result = {};
+  for(const [id,room] of Object.entries(rooms)){
+    result[id] = { name:room.name, inviteOnly:room.inviteOnly };
   }
-  const id = Math.random().toString(36).substring(2,9);
-  rooms[id] = { name, password: password||null, inviteOnly: !!inviteOnly, messages: [] };
-  res.json({ success:true, roomId:id, inviteLink: `/room/${id}` });
+  res.json(result);
 });
 
-app.get("/rooms",(req,res)=>{
-  const visibleRooms = {};
-  Object.entries(rooms).forEach(([id,r])=>{
-    if(!r.inviteOnly) visibleRooms[id] = { name: r.name };
-  });
-  res.json(visibleRooms);
+app.post("/create-room", checkAuth, (req,res)=>{
+  const { name, password, inviteOnly } = req.body;
+  const roomId = crypto.randomBytes(4).toString("hex");
+  rooms[roomId] = { name, password:password||"", inviteOnly:!!inviteOnly, users:[] };
+  res.json({ success:true, roomId });
 });
 
-app.get("/room/:roomId", checkAuth, (req,res)=>{
-  if(!rooms[req.params.roomId]) return res.redirect("/"); // redirect if room doesn't exist
-  res.sendFile(path.join(__dirname,"public/index.html"));
+app.get("/room-info/:roomId", checkAuth, (req,res)=>{
+  const r = rooms[req.params.roomId];
+  if(!r) return res.json({ success:false });
+  res.json({ success:true, name:r.name });
 });
 
-// --- DM ---
+// --- DMs ---
 app.get("/dm/:friend", checkAuth, (req,res)=>{
-  const user = req.session.user;
-  const friend = req.params.friend;
-  if(!users[friend] || !users[user].friends.includes(friend)) return res.json({ success:false });
-  const key = [user,friend].sort().join("_");
-  res.json({ success:true, messages: dms[key]||[] });
-});
-
-// --- Admin ---
-app.get("/admin", checkAdmin, (req,res)=>{
-  res.sendFile(path.join(__dirname,"public/admin.html"));
-});
-app.get("/admin/check",(req,res)=>{
-  res.json({ allowed: adminIPs.includes(req.ip) });
-});
-app.post("/admin/ban",(req,res)=>{
-  const { user } = req.body;
-  if(users[user]) users[user].banned = true;
-  res.json({ success:true });
-});
-app.post("/admin/unban",(req,res)=>{
-  const { user } = req.body;
-  if(users[user]) users[user].banned = false;
-  res.json({ success:true });
-});
-
-// --- Message management ---
-function generateId() { return Math.random().toString(36).substring(2,10); }
-
-app.post("/edit-message", checkAuth, (req,res)=>{
-  const { roomId, msgId, newMsg } = req.body;
-  const user = req.session.user;
-  const room = rooms[roomId];
-  if(!room) return res.json({ success:false });
-  const msg = room.messages.find(m=>m.id===msgId);
-  if(!msg) return res.json({ success:false });
-  if(msg.sender!==user && !adminIPs.includes(req.ip)) return res.json({ success:false });
-  msg.message = newMsg;
-  io.to(roomId).emit("updateMessage", msg);
-  res.json({ success:true });
-});
-
-app.post("/delete-message", checkAuth, (req,res)=>{
-  const { roomId, msgId } = req.body;
-  const user = req.session.user;
-  const room = rooms[roomId];
-  if(!room) return res.json({ success:false });
-  const msgIndex = room.messages.findIndex(m=>m.id===msgId);
-  if(msgIndex===-1) return res.json({ success:false });
-  const msg = room.messages[msgIndex];
-  if(msg.sender!==user && !adminIPs.includes(req.ip)) return res.json({ success:false });
-  room.messages.splice(msgIndex,1);
-  io.to(roomId).emit("deleteMessage", msgId);
-  res.json({ success:true });
+  const userA = req.session.user;
+  const userB = req.params.friend;
+  const key = [userA,userB].sort().join("_");
+  res.json({ success:true, messages:dms[key]||[] });
 });
 
 // --- Socket.io ---
-io.on("connection",(socket)=>{
-  socket.on("registerUser",(username)=>socket.join(username));
+io.on("connection", socket=>{
+  let username = null;
 
-  socket.on("joinRoom",({roomId,username})=>{
+  socket.on("registerUser", name=>{ username=name; });
+
+  // Room chat
+  socket.on("joinRoom", ({roomId,username:user})=>{
     socket.join(roomId);
-    const room = rooms[roomId];
-    if(room) socket.emit("chatHistory", room.messages);
+    if(!rooms[roomId].users.includes(user)) rooms[roomId].users.push(user);
+    socket.emit("chatHistory", rooms[roomId].messages || []);
   });
 
-  socket.on("roomMessage",({roomId,username,message})=>{
-    const room = rooms[roomId];
-    if(room){
-      const msg = { 
-        id: generateId(), 
-        username, 
-        sender: username, 
-        avatar: users[username]?.avatar || "/default.png", 
-        message, 
-        time:new Date() 
-      };
-      room.messages.push(msg);
-      io.to(roomId).emit("roomMessage", msg);
-    }
+  socket.on("roomMessage", ({roomId,username:sender,message})=>{
+    const avatar = users[sender]?.avatar || '/default.png';
+    const msgObj = { id:crypto.randomBytes(4).toString("hex"), sender, message, avatar };
+    if(!rooms[roomId].messages) rooms[roomId].messages=[];
+    rooms[roomId].messages.push(msgObj);
+    io.to(roomId).emit("roomMessage", msgObj);
   });
 
-  socket.on("dmMessage",({to,from,message})=>{
-    if(!users[to]||!users[from]) return;
-    if(!users[to].friends.includes(from)) return;
-
-    const key=[to,from].sort().join("_");
+  // DMs
+  socket.on("dmMessage", ({to,from,message})=>{
+    const key = [to,from].sort().join("_");
+    const avatar = users[from]?.avatar || '/default.png';
+    const msgObj = { id:crypto.randomBytes(4).toString("hex"), sender:from, message, avatar };
     if(!dms[key]) dms[key]=[];
-
-    const msg={id: generateId(), sender: from, message, avatar: users[from]?.avatar || "/default.png", time:new Date()};
-    dms[key].push(msg);
-
-    io.to(to).emit("dmMessage",msg);
-    io.to(from).emit("dmMessage",msg);
-    io.to(to).emit("dmNotification",{from});
-  });
-
-  socket.on("adminJoinRoom",(roomId)=>{
-    socket.join(roomId);
-    const room = rooms[roomId];
-    if(room) socket.emit("chatHistory",room.messages);
+    dms[key].push(msgObj);
+    // emit to sender and receiver if online
+    io.emit("dmMessage", msgObj);
   });
 });
 
-http.listen(3000,()=>console.log("Server running on http://localhost:3000"));
+// --- Start server ---
+const PORT = process.env.PORT || 3000;
+httpServer.listen(PORT, ()=> console.log(`Server running on port ${PORT}`));
