@@ -3,31 +3,50 @@
 <head>
 <meta charset="UTF-8">
 <title>Account Settings</title>
+<style>
+body { background:#2c2f33; color:#fff; font-family:Arial, sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; margin:0; }
+.container { background:#23272a; padding:30px; border-radius:10px; width:350px; text-align:center; }
+#pfp { width:100px; height:100px; border-radius:50%; object-fit:cover; border:3px solid #5865f2; margin-bottom:15px; }
+input { width:100%; padding:8px; margin-bottom:10px; border-radius:5px; border:none; }
+button { width:100%; padding:10px; border:none; border-radius:5px; background:#5865f2; color:#fff; font-weight:bold; cursor:pointer; }
+button:hover { background:#4752c4; }
+</style>
 </head>
 <body>
+<div class="container">
 <h2>Account Settings</h2>
-<img id="pfp" src="" width="100" style="border-radius:50%">
+<img id="pfp" src="/default.png">
+
 <form id="avatarForm">
-  <input type="file" name="avatar" accept="image/*" required>
-  <button type="submit">Update Avatar</button>
+<input type="text" id="avatarUrl" placeholder="Avatar URL (GIF/PNG/JPG)" required>
+<button type="submit">Update Avatar</button>
 </form>
+
 <button onclick="window.location.href='/index.html'">Back to Chat</button>
+</div>
 
 <script>
 async function init(){
   const res = await fetch("/me");
   const data = await res.json();
-  if(!data.loggedIn) window.location.href="/login.html";
-  document.getElementById("pfp").src = data.avatar;
+  if(!data.loggedIn) return window.location.href="/login.html";
+  document.getElementById("pfp").src = data.avatar || "/default.png";
 }
 
 document.getElementById("avatarForm").addEventListener("submit", async (e)=>{
   e.preventDefault();
-  const formData = new FormData(e.target);
-  const res = await fetch("/update-avatar", { method:"POST", body: formData });
+  const avatarUrl = document.getElementById("avatarUrl").value.trim();
+  if(!avatarUrl) return alert("Enter avatar URL");
+  const res = await fetch("/update-avatar", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ avatarUrl })
+  });
   const data = await res.json();
-  if(data.success) document.getElementById("pfp").src = data.avatar;
-  else alert(data.message || "Upload failed");
+  if(data.success){
+    document.getElementById("pfp").src = data.avatar;
+    alert("Avatar updated!");
+  } else alert(data.message || "Upload failed");
 });
 
 init();
