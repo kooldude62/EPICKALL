@@ -6,6 +6,8 @@ import { Server } from "socket.io";
 import path from "path";
 import { fileURLToPath } from "url";
 import crypto from "crypto";
+import multer from "multer";
+import fs from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,13 +16,18 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer);
 
+// --- Middleware ---
 app.use(express.static(path.join(__dirname, "public")));
 app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({
   secret: "supersecret",
   resave: false,
   saveUninitialized: false
 }));
+
+// --- Multer for file uploads ---
+const upload = multer({ dest: path.join(__dirname, "public/uploads/") });
 
 // --- In-memory storage ---
 const users = {}; // { username: { password, avatar, friends: [], createdAt } }
@@ -63,8 +70,18 @@ app.get("/me", (req,res)=>{
 });
 
 // --- Update avatar ---
-app.post("/update-avatar", checkAuth, (req,res)=>{
-  const { avatarUrl } = req.body;
+app.post("/update-avatar", checkAuth, upload.single("avatar"), (req,res)=>{
+  let avatarUrl = req.body.avatarUrl;
+
+  // Handle file upload
+  if(req.file){
+    const ext = path.extname(req.file.originalname);
+    const newName = `${req.session.user}_${Date.now()}${ext}`;
+    const dest = path.join(__dirname, "public/uploads", newName);
+    fs.renameSync(req.file.path, dest);
+    avatarUrl = `/uploads/${newName}`;
+  }
+
   if(!avatarUrl) return res.json({ success:false, message:"No avatar provided" });
   users[req.session.user].avatar = avatarUrl;
   res.json({ success:true, avatar:avatarUrl });
@@ -73,13 +90,17 @@ app.post("/update-avatar", checkAuth, (req,res)=>{
 // --- Friends ---
 app.get("/friends", checkAuth, (req,res)=>{
   const username = req.session.user;
-  const reqs = friendRequests[username] || [];
-  const friendsList = users[username].friends.map(f => ({
+
+  // Remove duplicates in requests
+  const reqs = [...new Set(friendRequests[username] || [])];
+
+  // Remove duplicates in friends
+  const friendsList = [...new Set(users[username].friends)].map(f => ({
     username:f,
     avatar:users[f]?.avatar || '/default.png'
   }));
 
-  // 10 most recently registered users (excluding self + friends)
+  // 10 most recent users excluding self and friends
   const recentUsers = Object.entries(users)
     .filter(([name]) => name !== username && !users[username].friends.includes(name))
     .sort((a,b) => b[1].createdAt - a[1].createdAt)
