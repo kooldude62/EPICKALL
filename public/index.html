@@ -87,7 +87,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const socket = io();
   let currentUser = null, currentRoom = null, currentDm = null, isAdmin = false;
 
-  // --- Notification ---
   function showNotification(msg){
     const notif=document.createElement("div");
     notif.className="notification"; notif.innerText=msg;
@@ -113,7 +112,6 @@ document.addEventListener("DOMContentLoaded", () => {
     window.location.href="/login.html";
   });
 
-  // --- Initialize ---
   async function init(){
     const res = await fetch("/me");
     const data = await res.json();
@@ -135,6 +133,7 @@ document.addEventListener("DOMContentLoaded", () => {
   async function loadFriends(){
     const res = await fetch("/friends");
     const data = await res.json();
+
     const reqsDiv = document.getElementById("friendRequests");
     reqsDiv.innerHTML = "";
     data.requests.forEach(r => {
@@ -149,19 +148,19 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     const listDiv = document.getElementById("friendsList");
-    listDiv.innerHTML = "";
     const dmDiv = document.getElementById("dmList");
-    dmDiv.innerHTML = "";
+    listDiv.innerHTML = ""; dmDiv.innerHTML = "";
+
     data.friends.forEach(f=>{
       const fDiv = document.createElement("div");
       fDiv.className="friend";
-      fDiv.innerHTML = `<span>${f}</span>`;
+      fDiv.innerHTML = `<img src="${f.avatar||'/default.png'}" class="avatar"><span>${f.username||f}</span>`;
       listDiv.appendChild(fDiv);
 
       const dmItem = document.createElement("div");
       dmItem.className="dm";
-      dmItem.innerHTML = `<span>${f}</span>`;
-      dmItem.addEventListener("click", ()=> openDm(f));
+      dmItem.innerHTML = `<img src="${f.avatar||'/default.png'}" class="avatar"><span>${f.username||f}</span>`;
+      dmItem.addEventListener("click", ()=> openDm(f.username||f));
       dmDiv.appendChild(dmItem);
     });
   }
@@ -217,7 +216,12 @@ document.addEventListener("DOMContentLoaded", () => {
     const data = await res.json();
     if(data.success){
       const box = document.getElementById("inviteBox");
-      box.innerHTML = `<input type="text" value="${data.inviteLink}" readonly>`;
+      const linkInput = document.createElement("input");
+      linkInput.value = `${window.location.origin}?invite=${data.roomId}`;
+      linkInput.readOnly = true;
+      linkInput.addEventListener("click", ()=> linkInput.select());
+      box.innerHTML="";
+      box.appendChild(linkInput);
     } else showNotification(data.message);
     loadRooms();
   }
@@ -231,14 +235,23 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   document.getElementById("createRoomBtn").addEventListener("click", createRoom);
+
+  // --- Enter key to send ---
+  document.getElementById("roomMsg").addEventListener("keydown", e=>{
+    if(e.key==="Enter") document.getElementById("sendRoomMsgBtn").click();
+  });
+  document.getElementById("dmMsg").addEventListener("keydown", e=>{
+    if(e.key==="Enter") document.getElementById("sendDmMsgBtn").click();
+  });
+
+  // --- Room Messages ---
   document.getElementById("sendRoomMsgBtn").addEventListener("click", ()=>{
     const msg = document.getElementById("roomMsg").value;
-    if(!msg) return;
+    if(!msg || !currentRoom) return;
     socket.emit("roomMessage",{roomId:currentRoom,username:currentUser,message:msg});
     document.getElementById("roomMsg").value="";
   });
 
-  // --- Room Messages ---
   function renderMessages(msgs){
     const box = document.getElementById("roomChatBox");
     box.innerHTML = "";
@@ -249,39 +262,19 @@ document.addEventListener("DOMContentLoaded", () => {
     const box = document.getElementById("roomChatBox");
     const div = document.createElement("div");
     div.className="message"; div.id=msg.id;
-    const controls=[];
-    if(msg.sender===currentUser || isAdmin){
-      const editBtn = document.createElement("button"); editBtn.innerText="Edit";
-      editBtn.addEventListener("click", ()=> editMessage(msg.id));
-      const delBtn = document.createElement("button"); delBtn.innerText="Delete";
-      delBtn.addEventListener("click", ()=> deleteMessage(msg.id));
-      controls.push(editBtn,delBtn);
-    }
-    div.innerHTML=`<b>${msg.sender}:</b> <span class="text">${msg.message}</span> `;
-    controls.forEach(c=>div.appendChild(c));
+    const avatar = document.createElement("img");
+    avatar.src = msg.avatar || '/default.png';
+    avatar.className="avatar";
+    div.appendChild(avatar);
+    const span = document.createElement("span");
+    span.innerHTML = `<b>${msg.sender}:</b> ${msg.message}`;
+    div.appendChild(span);
     box.appendChild(div);
     box.scrollTop = box.scrollHeight;
   }
 
-  async function editMessage(msgId){
-    const newMsg = prompt("Edit message:");
-    if(!newMsg) return;
-    await fetch("/edit-message",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({roomId:currentRoom,msgId,newMsg})});
-  }
-
-  async function deleteMessage(msgId){
-    await fetch("/delete-message",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({roomId:currentRoom,msgId})});
-  }
-
   socket.on("chatHistory", renderMessages);
   socket.on("roomMessage", renderMessage);
-  socket.on("updateMessage", msg=>{
-    const el=document.getElementById(msg.id);
-    if(el) el.querySelector(".text").innerText=msg.message;
-  });
-  socket.on("deleteMessage", msgId=>{
-    const el=document.getElementById(msgId); if(el) el.remove();
-  });
 
   // --- DMs ---
   function openDm(friend){
@@ -300,15 +293,22 @@ document.addEventListener("DOMContentLoaded", () => {
       data.messages.forEach(m=>{
         const div=document.createElement("div");
         div.className="message";
-        div.innerHTML=`<b>${m.sender}:</b> ${m.message}`;
+        const avatar = document.createElement("img");
+        avatar.src = m.avatar || '/default.png';
+        avatar.className="avatar";
+        div.appendChild(avatar);
+        const span=document.createElement("span");
+        span.innerHTML=`<b>${m.sender}:</b> ${m.message}`;
+        div.appendChild(span);
         box.appendChild(div);
       });
+      box.scrollTop = box.scrollHeight;
     }
   }
 
   document.getElementById("sendDmMsgBtn").addEventListener("click", ()=>{
     const msg=document.getElementById("dmMsg").value;
-    if(!msg) return;
+    if(!msg || !currentDm) return;
     socket.emit("dmMessage",{to:currentDm,from:currentUser,message:msg});
     document.getElementById("dmMsg").value="";
   });
@@ -318,18 +318,28 @@ document.addEventListener("DOMContentLoaded", () => {
       const box=document.getElementById("dmChatBox");
       const div=document.createElement("div");
       div.className="message";
-      div.innerHTML=`<b>${msg.sender}:</b> ${msg.message}`;
+      const avatar = document.createElement("img");
+      avatar.src = msg.avatar || '/default.png';
+      avatar.className="avatar";
+      div.appendChild(avatar);
+      const span=document.createElement("span");
+      span.innerHTML=`<b>${msg.sender}:</b> ${msg.message}`;
+      div.appendChild(span);
       box.appendChild(div);
       box.scrollTop=box.scrollHeight;
     } else showNotification(`New message from ${msg.sender}`);
   });
 
-  socket.on("dmNotification", data=>{
-    const {from} = data;
-    if(currentDm!==from) showNotification(`New message from ${from}`);
-  });
+  // --- Handle invite links ---
+  const urlParams = new URLSearchParams(window.location.search);
+  const inviteId = urlParams.get("invite");
+  if(inviteId){
+    fetch(`/room-info/${inviteId}`).then(r=>r.json()).then(data=>{
+      if(data.success) joinRoom(inviteId,data.name);
+      else showNotification("Invalid invite link");
+    });
+  }
 
-  // --- Init ---
   init();
 });
 </script>
