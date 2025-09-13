@@ -25,7 +25,7 @@ app.use(session({
 // --- In-memory storage ---
 const users = {}; // { username: { password, avatar, friends: [], createdAt } }
 const friendRequests = {}; // { username: [fromUser1, fromUser2] }
-const rooms = {}; // { roomId: { name, password, inviteOnly, users: [] } }
+const rooms = {}; // { roomId: { name, password, inviteOnly, users: [], messages: [] } }
 const dms = {}; // { "userA_userB": [{ sender, message, avatar, id }] }
 
 // --- Auth middleware ---
@@ -59,7 +59,15 @@ app.post("/logout", (req,res)=>{
 app.get("/me", (req,res)=>{
   if(!req.session.user) return res.json({ loggedIn:false });
   const u = users[req.session.user];
-  res.json({ loggedIn:true, username:req.session.user, admin:u.admin||false });
+  res.json({ loggedIn:true, username:req.session.user, admin:u.admin||false, avatar:u.avatar });
+});
+
+// --- Update avatar ---
+app.post("/update-avatar", checkAuth, (req,res)=>{
+  const { avatarUrl } = req.body;
+  if(!avatarUrl) return res.json({ success:false, message:"No avatar provided" });
+  users[req.session.user].avatar = avatarUrl;
+  res.json({ success:true, avatar:avatarUrl });
 });
 
 // --- Friends ---
@@ -71,12 +79,12 @@ app.get("/friends", checkAuth, (req,res)=>{
     avatar:users[f]?.avatar || '/default.png'
   }));
 
-  // Get 10 most recently registered users, excluding self and existing friends
+  // 10 most recently registered users (excluding self + friends)
   const recentUsers = Object.entries(users)
-    .filter(([name])=>name!==username && !users[username].friends.includes(name))
-    .sort((a,b)=>b[1].createdAt - a[1].createdAt)
+    .filter(([name]) => name !== username && !users[username].friends.includes(name))
+    .sort((a,b) => b[1].createdAt - a[1].createdAt)
     .slice(0,10)
-    .map(([name,data])=>({ username:name, avatar:data.avatar || '/default.png' }));
+    .map(([name,data]) => ({ username:name, avatar:data.avatar || '/default.png' }));
 
   res.json({ requests:reqs, friends:friendsList, recent:recentUsers });
 });
@@ -114,7 +122,7 @@ app.get("/rooms", checkAuth, (req,res)=>{
 app.post("/create-room", checkAuth, (req,res)=>{
   const { name, password, inviteOnly } = req.body;
   const roomId = crypto.randomBytes(4).toString("hex");
-  rooms[roomId] = { name, password:password||"", inviteOnly:!!inviteOnly, users:[] };
+  rooms[roomId] = { name, password:password||"", inviteOnly:!!inviteOnly, users:[], messages:[] };
   res.json({ success:true, roomId });
 });
 
@@ -160,7 +168,6 @@ io.on("connection", socket=>{
     const msgObj = { id:crypto.randomBytes(4).toString("hex"), sender:from, message, avatar };
     if(!dms[key]) dms[key]=[];
     dms[key].push(msgObj);
-    // emit to sender and receiver if online
     io.emit("dmMessage", msgObj);
   });
 });
