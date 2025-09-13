@@ -7,8 +7,6 @@ import session from "express-session";
 import path from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
-import multer from "multer";
-import fs from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -17,13 +15,12 @@ const app = express();
 const http = createServer(app);
 const io = new Server(http);
 
-// --- In-memory DB ---
-const users = {}; // { username: { passwordHash, friends: [], requests: [], avatar, banned } }
+const users = {}; // { username: { passwordHash, friends: [], requests: [], avatar, banned: false } }
 const rooms = {}; // { roomId: { name, password, inviteOnly, messages: [] } }
-const dms = {};   // { "userA_userB": [{ id, sender, message, time }] }
-const adminIPs = ["127.0.0.1"];
+const dms = {};   // { "userA_userB": [{ id, sender, message, avatar, time }] }
+const adminIPs = ["127.0.0.1"]; // Admin IPs whitelist
 
-// --- Middleware ---
+// Middleware
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({
@@ -33,42 +30,32 @@ app.use(session({
 }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// --- Avatar Upload Setup ---
-const uploadFolder = path.join(__dirname, "public/uploads");
-if (!fs.existsSync(uploadFolder)) fs.mkdirSync(uploadFolder, { recursive: true });
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadFolder),
-  filename: (req, file, cb) => {
-    const ext = file.originalname.split(".").pop();
-    cb(null, req.session.user + "." + ext);
-  }
-});
-const upload = multer({ storage });
-
-// --- Auth Middleware ---
-function checkAuth(req,res,next){
+function checkAuth(req, res, next){
   if(!req.session.user) return res.redirect("/login.html");
   if(users[req.session.user]?.banned) return res.send("You are banned");
   next();
 }
-
-function checkAdmin(req,res,next){
+function checkAdmin(req, res, next){
   if(!adminIPs.includes(req.ip)) return res.status(403).send("Forbidden");
   next();
 }
 
-// --- Routes ---
-// Signup
-app.post("/signup", async (req,res)=>{
+// --- Auth ---
+app.post("/signup", async (req, res)=>{
   const { username, password } = req.body;
-  if(users[username]) return res.json({ success:false, message:"User exists" });
+  if(users[username]) return res.json({ success: false, message: "User exists" });
   const passwordHash = await bcrypt.hash(password, 10);
-  users[username] = { passwordHash, friends: [], requests: [], avatar: `/uploads/default.png`, banned: false };
+  users[username] = { 
+    passwordHash, 
+    friends: [], 
+    requests: [], 
+    avatar: `/avatars/${Math.floor(Math.random()*5)+1}.png`, 
+    banned: false 
+  };
   req.session.user = username;
-  res.json({ success:true });
+  res.json({ success: true });
 });
 
-// Login
 app.post("/login", async (req,res)=>{
   const { username, password } = req.body;
   if(!users[username]) return res.json({ success:false, message:"Invalid credentials" });
@@ -78,30 +65,21 @@ app.post("/login", async (req,res)=>{
   res.json({ success:true });
 });
 
-// Logout
-app.post("/logout", (req,res)=>{
+app.post("/logout",(req,res)=>{
   req.session.destroy(err=>{
     if(err) return res.json({ success:false });
     res.json({ success:true });
   });
 });
 
-// Current user info
-app.get("/me", (req,res)=>{
+app.get("/me",(req,res)=>{
   if(!req.session.user) return res.json({ loggedIn:false });
-  res.json({
-    loggedIn:true,
-    username:req.session.user,
-    avatar: users[req.session.user].avatar,
-    admin: adminIPs.includes(req.ip)
+  res.json({ 
+    loggedIn:true, 
+    username:req.session.user, 
+    avatar: users[req.session.user].avatar, 
+    admin: adminIPs.includes(req.ip) 
   });
-});
-
-// --- Avatar Update ---
-app.post("/update-avatar", checkAuth, upload.single("avatar"), (req,res)=>{
-  if(!req.file) return res.status(400).json({ success:false, message:"No file uploaded" });
-  users[req.session.user].avatar = `/uploads/${req.file.filename}`;
-  res.json({ success:true, avatar: users[req.session.user].avatar });
 });
 
 // --- Friends ---
@@ -109,17 +87,29 @@ app.post("/friend-request", (req,res)=>{
   const from = req.session.user;
   const to = req.body.to;
   if(!from || !users[to]) return res.json({ success:false });
-  if(from===to) return res.json({ success:false, message:"You can't friend yourself" });
-  if(!users[to].requests.includes(from) && !users[to].friends.includes(from)) users[to].requests.push(from);
+  if(from===to) return res.json({ success:false, message:"You can’t friend yourself!" });
+  if(!users[to].requests.includes(from) && !users[to].friends.includes(from)){
+    users[to].requests.push(from);
+  }
   res.json({ success:true });
 });
 
-app.get("/friends", checkAuth, (req,res)=>{
+app.get("/friends",(req,res)=>{
   const user = req.session.user;
-  res.json({ friends: users[user]?.friends||[], requests: users[user]?.requests||[] });
+  const data = {
+    friends: users[user]?.friends.map(f => ({
+      username: f,
+      avatar: users[f]?.avatar || "/default.png"
+    })) || [],
+    requests: users[user]?.requests.map(r => ({
+      username: r,
+      avatar: users[r]?.avatar || "/default.png"
+    })) || []
+  };
+  res.json(data);
 });
 
-app.post("/accept-request", checkAuth, (req,res)=>{
+app.post("/accept-request",(req,res)=>{
   const user = req.session.user;
   const from = req.body.from;
   if(users[user] && users[from]){
@@ -131,18 +121,27 @@ app.post("/accept-request", checkAuth, (req,res)=>{
 });
 
 // --- Rooms ---
-app.post("/create-room", checkAuth, (req,res)=>{
+app.post("/create-room", (req,res)=>{
   const { name, password, inviteOnly } = req.body;
-  for(const r of Object.values(rooms)) if(r.name.toLowerCase()===name.toLowerCase()) return res.json({ success:false, message:"Room name exists" });
+  for(const r of Object.values(rooms)){
+    if(r.name.toLowerCase()===name.toLowerCase()) return res.json({ success:false, message:"Room name exists" });
+  }
   const id = Math.random().toString(36).substring(2,9);
   rooms[id] = { name, password: password||null, inviteOnly: !!inviteOnly, messages: [] };
-  res.json({ success:true, roomId:id, inviteLink: `${req.protocol}://${req.get("host")}/room/${id}` });
+  res.json({ success:true, roomId:id, inviteLink: `/room/${id}` });
 });
 
-app.get("/rooms", checkAuth, (req,res)=>{
+app.get("/rooms",(req,res)=>{
   const visibleRooms = {};
-  Object.entries(rooms).forEach(([id,r])=>{ if(!r.inviteOnly) visibleRooms[id] = { name: r.name }; });
+  Object.entries(rooms).forEach(([id,r])=>{
+    if(!r.inviteOnly) visibleRooms[id] = { name: r.name };
+  });
   res.json(visibleRooms);
+});
+
+app.get("/room/:roomId", checkAuth, (req,res)=>{
+  if(!rooms[req.params.roomId]) return res.redirect("/"); // redirect if room doesn't exist
+  res.sendFile(path.join(__dirname,"public/index.html"));
 });
 
 // --- DM ---
@@ -155,12 +154,25 @@ app.get("/dm/:friend", checkAuth, (req,res)=>{
 });
 
 // --- Admin ---
-app.get("/admin", checkAdmin, (req,res)=>res.sendFile(path.join(__dirname,"public/admin.html")));
-app.post("/admin/ban", checkAdmin, (req,res)=>{ const { user } = req.body; if(users[user]) users[user].banned = true; res.json({ success:true }); });
-app.post("/admin/unban", checkAdmin, (req,res)=>{ const { user } = req.body; if(users[user]) users[user].banned = false; res.json({ success:true }); });
+app.get("/admin", checkAdmin, (req,res)=>{
+  res.sendFile(path.join(__dirname,"public/admin.html"));
+});
+app.get("/admin/check",(req,res)=>{
+  res.json({ allowed: adminIPs.includes(req.ip) });
+});
+app.post("/admin/ban",(req,res)=>{
+  const { user } = req.body;
+  if(users[user]) users[user].banned = true;
+  res.json({ success:true });
+});
+app.post("/admin/unban",(req,res)=>{
+  const { user } = req.body;
+  if(users[user]) users[user].banned = false;
+  res.json({ success:true });
+});
 
-// --- Messages ---
-function generateId(){ return Math.random().toString(36).substring(2,10); }
+// --- Message management ---
+function generateId() { return Math.random().toString(36).substring(2,10); }
 
 app.post("/edit-message", checkAuth, (req,res)=>{
   const { roomId, msgId, newMsg } = req.body;
@@ -190,35 +202,51 @@ app.post("/delete-message", checkAuth, (req,res)=>{
 });
 
 // --- Socket.io ---
-io.on("connection", (socket)=>{
-  socket.on("registerUser", username=>socket.join(username));
+io.on("connection",(socket)=>{
+  socket.on("registerUser",(username)=>socket.join(username));
 
-  socket.on("joinRoom", ({roomId, username})=>{
+  socket.on("joinRoom",({roomId,username})=>{
     socket.join(roomId);
     const room = rooms[roomId];
     if(room) socket.emit("chatHistory", room.messages);
   });
 
-  socket.on("roomMessage", ({roomId, username, message})=>{
+  socket.on("roomMessage",({roomId,username,message})=>{
     const room = rooms[roomId];
     if(room){
-      const msg = { id: generateId(), sender: username, message, time:new Date() };
+      const msg = { 
+        id: generateId(), 
+        username, 
+        sender: username, 
+        avatar: users[username]?.avatar || "/default.png", 
+        message, 
+        time:new Date() 
+      };
       room.messages.push(msg);
       io.to(roomId).emit("roomMessage", msg);
     }
   });
 
-  socket.on("dmMessage", ({to, from, message})=>{
+  socket.on("dmMessage",({to,from,message})=>{
     if(!users[to]||!users[from]) return;
     if(!users[to].friends.includes(from)) return;
-    const key = [to,from].sort().join("_");
+
+    const key=[to,from].sort().join("_");
     if(!dms[key]) dms[key]=[];
-    const msg={id: generateId(), sender: from, message, time:new Date()};
+
+    const msg={id: generateId(), sender: from, message, avatar: users[from]?.avatar || "/default.png", time:new Date()};
     dms[key].push(msg);
-    io.to(to).emit("dmMessage", msg);
-    io.to(from).emit("dmMessage", msg);
+
+    io.to(to).emit("dmMessage",msg);
+    io.to(from).emit("dmMessage",msg);
     io.to(to).emit("dmNotification",{from});
+  });
+
+  socket.on("adminJoinRoom",(roomId)=>{
+    socket.join(roomId);
+    const room = rooms[roomId];
+    if(room) socket.emit("chatHistory",room.messages);
   });
 });
 
-http.listen(process.env.PORT || 3000, ()=>console.log("Server running"));
+http.listen(3000,()=>console.log("Server running on http://localhost:3000"));
