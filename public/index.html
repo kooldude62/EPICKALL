@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Chat App</title>
+<title>Epick Chat</title>
 <script src="/socket.io/socket.io.js"></script>
 <style>
 body { margin:0; font-family:Arial; background:#2c2f33; color:#fff; }
@@ -13,13 +13,13 @@ body { margin:0; font-family:Arial; background:#2c2f33; color:#fff; }
 .tab.active { background:#7289da; }
 .content { padding:15px; display:none; }
 .content.active { display:block; }
-.friend, .room, .dm { background:#40444b; margin:6px 0; padding:10px; border-radius:6px; display:flex; justify-content:space-between; cursor:pointer; }
+.friend, .room, .dm { background:#40444b; margin:6px 0; padding:10px; border-radius:6px; display:flex; justify-content:space-between; cursor:pointer; align-items:center; }
 .friend:hover, .room:hover, .dm:hover { background:#5865f2; }
 input, button { background:#2f3136; color:#fff; border:none; padding:8px; margin:5px 0; border-radius:4px; }
 button { cursor:pointer; background:#5865f2; }
 button:hover { background:#4752c4; }
 .chatbox { height:300px; overflow-y:auto; border:1px solid #202225; padding:10px; background:#2f3136; border-radius:4px; margin-bottom:10px; }
-.message { margin:4px 0; }
+.message { margin:4px 0; display:flex; align-items:center; }
 .notification { position:fixed; bottom:10px; right:10px; background:#5865f2; padding:8px; border-radius:6px; color:#fff; z-index:1000; }
 .avatar { width:32px; height:32px; border-radius:50%; margin-right:8px; }
 </style>
@@ -46,6 +46,8 @@ button:hover { background:#4752c4; }
   <input type="text" id="searchUser" placeholder="Search username">
   <button id="searchBtn">Search</button>
   <div id="searchResults"></div>
+  <h4>Recently Registered</h4>
+  <div id="recentUsers"></div>
   <h4>Requests</h4>
   <div id="friendRequests"></div>
   <h4>Your Friends</h4>
@@ -107,7 +109,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // --- Account & Logout ---
   document.getElementById("accountBtn").addEventListener("click", ()=> window.location.href="/account.html");
-  document.getElementById("logoutBtn").addEventListener("click", async ()=>{
+  document.getElementById("logoutBtn").addEventListener("click", async ()=> {
     await fetch("/logout",{method:"POST"});
     window.location.href="/login.html";
   });
@@ -134,6 +136,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const res = await fetch("/friends");
     const data = await res.json();
 
+    // Friend requests
     const reqsDiv = document.getElementById("friendRequests");
     reqsDiv.innerHTML = "";
     data.requests.forEach(r => {
@@ -147,6 +150,7 @@ document.addEventListener("DOMContentLoaded", () => {
       reqsDiv.appendChild(div);
     });
 
+    // Friends
     const listDiv = document.getElementById("friendsList");
     const dmDiv = document.getElementById("dmList");
     listDiv.innerHTML = ""; dmDiv.innerHTML = "";
@@ -154,14 +158,28 @@ document.addEventListener("DOMContentLoaded", () => {
     data.friends.forEach(f=>{
       const fDiv = document.createElement("div");
       fDiv.className="friend";
-      fDiv.innerHTML = `<img src="${f.avatar||'/default.png'}" class="avatar"><span>${f.username||f}</span>`;
+      fDiv.innerHTML = `<img src="${f.avatar}" class="avatar"><span>${f.username}</span>`;
       listDiv.appendChild(fDiv);
 
       const dmItem = document.createElement("div");
       dmItem.className="dm";
-      dmItem.innerHTML = `<img src="${f.avatar||'/default.png'}" class="avatar"><span>${f.username||f}</span>`;
-      dmItem.addEventListener("click", ()=> openDm(f.username||f));
+      dmItem.innerHTML = `<img src="${f.avatar}" class="avatar"><span>${f.username}</span>`;
+      dmItem.addEventListener("click", ()=> openDm(f.username));
       dmDiv.appendChild(dmItem);
+    });
+
+    // Recently registered users
+    const recentDiv = document.getElementById("recentUsers");
+    recentDiv.innerHTML = "";
+    data.recent.forEach(u=>{
+      const div = document.createElement("div");
+      div.className="friend";
+      div.innerHTML = `<img src="${u.avatar}" class="avatar"><span>${u.username}</span>`;
+      const btn = document.createElement("button");
+      btn.innerText = "Add Friend";
+      btn.addEventListener("click", ()=> sendFriendRequest(u.username));
+      div.appendChild(btn);
+      recentDiv.appendChild(div);
     });
   }
 
