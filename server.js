@@ -6,8 +6,6 @@ import { Server } from "socket.io";
 import path from "path";
 import { fileURLToPath } from "url";
 import crypto from "crypto";
-import multer from "multer";
-import fs from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,21 +14,16 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer);
 
-// --- Middleware ---
 app.use(express.static(path.join(__dirname, "public")));
 app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({
   secret: "supersecret",
   resave: false,
   saveUninitialized: false
 }));
 
-// --- Multer for file uploads ---
-const upload = multer({ dest: path.join(__dirname, "public/uploads/") });
-
 // --- In-memory storage ---
-const users = {}; // { username: { password, avatar, friends: [], createdAt } }
+const users = {}; // { username: { password, avatar, friends: [], starredRooms: [], createdAt } }
 const friendRequests = {}; // { username: [fromUser1, fromUser2] }
 const rooms = {}; // { roomId: { name, password, inviteOnly, users: [], messages: [] } }
 const dms = {}; // { "userA_userB": [{ sender, message, avatar, id }] }
@@ -53,7 +46,13 @@ app.post("/login", (req,res)=>{
 app.post("/signup", (req,res)=>{
   const { username, password, avatar } = req.body;
   if(users[username]) return res.json({ success:false, message:"Username taken" });
-  users[username] = { password, avatar: avatar || "/default.png", friends: [], createdAt: Date.now() };
+  users[username] = { 
+    password, 
+    avatar: avatar || "/default.png", 
+    friends: [], 
+    starredRooms: [], 
+    createdAt: Date.now() 
+  };
   friendRequests[username] = [];
   req.session.user = username;
   res.json({ success:true });
@@ -66,22 +65,12 @@ app.post("/logout", (req,res)=>{
 app.get("/me", (req,res)=>{
   if(!req.session.user) return res.json({ loggedIn:false });
   const u = users[req.session.user];
-  res.json({ loggedIn:true, username:req.session.user, admin:u.admin||false, avatar:u.avatar });
+  res.json({ loggedIn:true, username:req.session.user, admin:u.admin||false, avatar:u.avatar, starredRooms:u.starredRooms||[] });
 });
 
-// --- Update avatar ---
-app.post("/update-avatar", checkAuth, upload.single("avatar"), (req,res)=>{
-  let avatarUrl = req.body.avatarUrl;
-
-  // Handle file upload
-  if(req.file){
-    const ext = path.extname(req.file.originalname);
-    const newName = `${req.session.user}_${Date.now()}${ext}`;
-    const dest = path.join(__dirname, "public/uploads", newName);
-    fs.renameSync(req.file.path, dest);
-    avatarUrl = `/uploads/${newName}`;
-  }
-
+// --- Update avatar via URL ---
+app.post("/update-avatar", checkAuth, (req,res)=>{
+  const { avatarUrl } = req.body;
   if(!avatarUrl) return res.json({ success:false, message:"No avatar provided" });
   users[req.session.user].avatar = avatarUrl;
   res.json({ success:true, avatar:avatarUrl });
@@ -90,19 +79,17 @@ app.post("/update-avatar", checkAuth, upload.single("avatar"), (req,res)=>{
 // --- Friends ---
 app.get("/friends", checkAuth, (req,res)=>{
   const username = req.session.user;
+  const reqs = friendRequests[username] || [];
+  const uniqueFriends = [...new Set(users[username].friends)]; // remove duplicates
+  users[username].friends = uniqueFriends;
 
-  // Remove duplicates in requests
-  const reqs = [...new Set(friendRequests[username] || [])];
-
-  // Remove duplicates in friends
-  const friendsList = [...new Set(users[username].friends)].map(f => ({
+  const friendsList = uniqueFriends.map(f => ({
     username:f,
     avatar:users[f]?.avatar || '/default.png'
   }));
 
-  // 10 most recent users excluding self and friends
   const recentUsers = Object.entries(users)
-    .filter(([name]) => name !== username && !users[username].friends.includes(name))
+    .filter(([name]) => name !== username && !uniqueFriends.includes(name))
     .sort((a,b) => b[1].createdAt - a[1].createdAt)
     .slice(0,10)
     .map(([name,data]) => ({ username:name, avatar:data.avatar || '/default.png' }));
@@ -125,8 +112,8 @@ app.post("/accept-request", checkAuth, (req,res)=>{
   const idx = friendRequests[username].indexOf(from);
   if(idx>-1){
     friendRequests[username].splice(idx,1);
-    users[username].friends.push(from);
-    users[from].friends.push(username);
+    if(!users[username].friends.includes(from)) users[username].friends.push(from);
+    if(!users[from].friends.includes(username)) users[from].friends.push(username);
   }
   res.json({ success:true });
 });
@@ -153,6 +140,21 @@ app.get("/room-info/:roomId", checkAuth, (req,res)=>{
   res.json({ success:true, name:r.name });
 });
 
+// --- Star/unstar room ---
+app.post("/star-room", checkAuth, (req,res)=>{
+  const { roomId } = req.body;
+  const starred = users[req.session.user].starredRooms || [];
+  if(!rooms[roomId]) return res.json({ success:false, message:"Room not found" });
+
+  if(starred.includes(roomId)){
+    users[req.session.user].starredRooms = starred.filter(r => r!==roomId);
+    res.json({ success:true, starred:false });
+  } else {
+    users[req.session.user].starredRooms.push(roomId);
+    res.json({ success:true, starred:true });
+  }
+});
+
 // --- DMs ---
 app.get("/dm/:friend", checkAuth, (req,res)=>{
   const userA = req.session.user;
@@ -167,7 +169,6 @@ io.on("connection", socket=>{
 
   socket.on("registerUser", name=>{ username=name; });
 
-  // Room chat
   socket.on("joinRoom", ({roomId,username:user})=>{
     socket.join(roomId);
     if(!rooms[roomId].users.includes(user)) rooms[roomId].users.push(user);
@@ -175,6 +176,7 @@ io.on("connection", socket=>{
   });
 
   socket.on("roomMessage", ({roomId,username:sender,message})=>{
+    if(message.length>300) message=message.slice(0,300); // limit 300
     const avatar = users[sender]?.avatar || '/default.png';
     const msgObj = { id:crypto.randomBytes(4).toString("hex"), sender, message, avatar };
     if(!rooms[roomId].messages) rooms[roomId].messages=[];
@@ -182,7 +184,6 @@ io.on("connection", socket=>{
     io.to(roomId).emit("roomMessage", msgObj);
   });
 
-  // DMs
   socket.on("dmMessage", ({to,from,message})=>{
     const key = [to,from].sort().join("_");
     const avatar = users[from]?.avatar || '/default.png';
