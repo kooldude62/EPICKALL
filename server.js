@@ -1,216 +1,143 @@
 import express from "express";
 import session from "express-session";
 import bodyParser from "body-parser";
-import { createServer } from "http";
+import bcrypt from "bcrypt";
 import { Server } from "socket.io";
+import { createServer } from "http";
+import multer from "multer";
 import path from "path";
-import { fileURLToPath } from "url";
-import crypto from "crypto";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import fs from "fs";
 
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer);
 
-app.use(express.static(path.join(__dirname, "public")));
+const PORT = process.env.PORT || 3000;
+
+// In-memory store (use MongoDB/SQLite for persistence in production)
+let users = {};
+let rooms = {};
+let dms = {}; // { userA_userB: [messages] }
+
+// Recent users
+let recentUsers = [];
+
+// Middleware
 app.use(bodyParser.json());
-app.use(session({
-  secret: "supersecret",
-  resave: false,
-  saveUninitialized: false
-}));
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(
+  session({
+    secret: "supersecret",
+    resave: false,
+    saveUninitialized: false,
+  })
+);
+app.use(express.static("public"));
 
-// --- Persistent storage (replace with database for production) ---
-const users = {}; 
-// { username: { password, avatar, friends: [], createdAt, starredRooms: [] } }
-const friendRequests = {}; 
-const rooms = {}; 
-const dms = {}; 
+// Multer setup for avatars
+const upload = multer({ dest: "public/avatars/" });
 
-// --- Middleware ---
-function checkAuth(req,res,next){
-  if(!req.session.user) return res.status(401).json({ loggedIn:false });
-  next();
-}
-
-// --- Auth ---
-app.post("/login", (req,res)=>{
+// Routes
+app.post("/signup", async (req, res) => {
   const { username, password } = req.body;
-  if(!users[username] || users[username].password !== password)
-    return res.json({ success:false, message:"Invalid credentials" });
-  req.session.user = username;
-  res.json({ success:true });
+  if (users[username]) return res.json({ success: false, message: "User exists" });
+
+  const hashed = await bcrypt.hash(password, 10);
+  users[username] = { username, password: hashed, avatar: "/default.png", friends: [], themes: [], starredRooms: [] };
+  req.session.user = users[username];
+
+  recentUsers.unshift(username);
+  if (recentUsers.length > 10) recentUsers.pop();
+
+  res.json({ success: true });
 });
 
-app.post("/signup", (req,res)=>{
-  const { username, password, avatar } = req.body;
-  if(users[username]) return res.json({ success:false, message:"Username taken" });
-  users[username] = { 
-    password, 
-    avatar: avatar || "/default.png", 
-    friends: [], 
-    createdAt: Date.now(),
-    starredRooms: []
-  };
-  friendRequests[username] = [];
-  req.session.user = username;
-  res.json({ success:true });
+app.post("/login", async (req, res) => {
+  const { username, password } = req.body;
+  const user = users[username];
+  if (!user) return res.json({ success: false, message: "Invalid credentials" });
+
+  const valid = await bcrypt.compare(password, user.password);
+  if (!valid) return res.json({ success: false, message: "Invalid credentials" });
+
+  req.session.user = user;
+  res.json({ success: true });
 });
 
-app.post("/logout", (req,res)=> req.session.destroy(()=> res.json({ success:true })) );
-
-app.get("/me", (req,res)=>{
-  if(!req.session.user) return res.json({ loggedIn:false });
-  const u = users[req.session.user];
-  res.json({ 
-    loggedIn:true, 
-    username:req.session.user, 
-    admin:u.admin||false, 
-    avatar:u.avatar, 
-    starredRooms:u.starredRooms 
-  });
+app.get("/me", (req, res) => {
+  if (!req.session.user) return res.json({ loggedIn: false });
+  res.json({ loggedIn: true, ...req.session.user });
 });
 
-// --- Avatar ---
-app.post("/update-avatar", checkAuth, (req,res)=>{
-  const { avatarUrl } = req.body;
-  if(!avatarUrl) return res.json({ success:false, message:"No avatar provided" });
-  users[req.session.user].avatar = avatarUrl;
-  res.json({ success:true, avatar:avatarUrl });
+app.post("/update-avatar", upload.single("avatar"), (req, res) => {
+  if (!req.session.user) return res.status(401).json({ success: false, message: "Not logged in" });
+  if (!req.file) return res.status(400).json({ success: false, message: "No avatar provided" });
+
+  const ext = path.extname(req.file.originalname);
+  const newPath = `public/avatars/${req.session.user.username}${ext}`;
+  fs.renameSync(req.file.path, newPath);
+
+  req.session.user.avatar = `/avatars/${req.session.user.username}${ext}`;
+  users[req.session.user.username].avatar = req.session.user.avatar;
+
+  res.json({ success: true, avatar: req.session.user.avatar });
 });
 
-// --- Friends ---
-app.get("/friends", checkAuth, (req,res)=>{
-  const username = req.session.user;
-  const reqs = friendRequests[username] || [];
-  const friendsList = [...new Set(users[username].friends)].map(f => ({
-    username:f,
-    avatar:users[f]?.avatar || '/default.png'
-  }));
-
-  const recentUsers = Object.entries(users)
-    .filter(([name]) => name !== username && !users[username].friends.includes(name))
-    .sort((a,b) => b[1].createdAt - a[1].createdAt)
-    .slice(0,10)
-    .map(([name,data]) => ({ username:name, avatar:data.avatar || '/default.png' }));
-
-  res.json({ requests:reqs, friends:friendsList, recent:recentUsers });
+// Recently joined
+app.get("/recent-users", (req, res) => {
+  res.json(recentUsers.map(u => ({ username: u, avatar: users[u]?.avatar || "/default.png" })));
 });
 
-app.post("/friend-request", checkAuth, (req,res)=>{
-  const { to } = req.body;
-  if(!users[to]) return res.json({ success:false, message:"User not found" });
-  if(users[req.session.user].friends.includes(to)) return res.json({ success:false, message:"Already friends" });
-  if(friendRequests[to].includes(req.session.user)) return res.json({ success:false, message:"Already requested" });
-  friendRequests[to].push(req.session.user);
+// Socket.io
+io.on("connection", (socket) => {
+  let currentUser;
 
-  // live update to target if online
-  for (let [id, s] of io.of("/").sockets) {
-    if (s.username === to) s.emit("friendRequest", req.session.user);
-  }
-
-  res.json({ success:true });
-});
-
-app.post("/accept-request", checkAuth, (req,res)=>{
-  const { from } = req.body;
-  const username = req.session.user;
-  const idx = friendRequests[username].indexOf(from);
-  if(idx>-1){
-    friendRequests[username].splice(idx,1);
-    users[username].friends.push(from);
-    users[from].friends.push(username);
-
-    // live updates
-    for (let [id, s] of io.of("/").sockets) {
-      if (s.username === from || s.username === username) {
-        s.emit("friendsUpdate");
-      }
-    }
-  }
-  res.json({ success:true });
-});
-
-// --- Rooms ---
-app.get("/rooms", checkAuth, (req,res)=>{
-  const result = {};
-  for(const [id,room] of Object.entries(rooms)){
-    result[id] = { name:room.name, inviteOnly:room.inviteOnly };
-  }
-  res.json(result);
-});
-
-app.post("/create-room", checkAuth, (req,res)=>{
-  const { name, password, inviteOnly } = req.body;
-  const roomId = crypto.randomBytes(4).toString("hex");
-  rooms[roomId] = { name, password:password||"", inviteOnly:!!inviteOnly, users:[], messages:[] };
-  res.json({ success:true, roomId });
-});
-
-app.post("/star-room", checkAuth, (req,res)=>{
-  const { roomId } = req.body;
-  if(!rooms[roomId]) return res.json({ success:false, message:"Room not found" });
-  const user = users[req.session.user];
-  if(!user.starredRooms.includes(roomId)) user.starredRooms.push(roomId);
-  res.json({ success:true, starred:user.starredRooms });
-});
-
-app.get("/room-info/:roomId", checkAuth, (req,res)=>{
-  const r = rooms[req.params.roomId];
-  if(!r) return res.json({ success:false });
-  res.json({ success:true, name:r.name });
-});
-
-// --- DMs ---
-app.get("/dm/:friend", checkAuth, (req,res)=>{
-  const userA = req.session.user;
-  const userB = req.params.friend;
-  const key = [userA,userB].sort().join("_");
-  res.json({ success:true, messages:dms[key]||[] });
-});
-
-// --- Socket.io ---
-io.on("connection", socket=>{
-  socket.on("registerUser", name=>{
-    socket.username = name;
+  socket.on("login", (username) => {
+    currentUser = username;
+    socket.join(username);
   });
 
   // Rooms
-  socket.on("joinRoom", ({roomId,username:user})=>{
-    socket.join(roomId);
-    if(!rooms[roomId].users.includes(user)) rooms[roomId].users.push(user);
-    socket.emit("chatHistory", rooms[roomId].messages || []);
+  socket.on("createRoom", (roomName) => {
+    if (!rooms[roomName]) rooms[roomName] = [];
+    io.emit("roomsUpdated", Object.keys(rooms));
   });
 
-  socket.on("roomMessage", ({roomId,username:sender,message})=>{
-    if(message.length>300) return; // limit
-    const avatar = users[sender]?.avatar || '/default.png';
-    const msgObj = { id:crypto.randomBytes(4).toString("hex"), sender, message, avatar };
-    if(!rooms[roomId].messages) rooms[roomId].messages=[];
-    rooms[roomId].messages.push(msgObj);
-    io.to(roomId).emit("roomMessage", msgObj);
+  socket.on("joinRoom", (roomName) => {
+    socket.join(roomName);
+    socket.emit("roomMessages", rooms[roomName] || []);
+  });
+
+  socket.on("roomMessage", ({ roomName, text }) => {
+    if (!text || text.length > 300) return;
+    const msg = { from: currentUser, text, avatar: users[currentUser].avatar, time: Date.now() };
+    rooms[roomName].push(msg);
+    io.to(roomName).emit("roomMessage", msg);
   });
 
   // DMs
-  socket.on("dmMessage", ({to,from,message})=>{
-    if(message.length>300) return;
-    const key = [to,from].sort().join("_");
-    const avatar = users[from]?.avatar || '/default.png';
-    const msgObj = { id:crypto.randomBytes(4).toString("hex"), sender:from, message, avatar };
-    if(!dms[key]) dms[key]=[];
-    dms[key].push(msgObj);
+  socket.on("dm", ({ to, text }) => {
+    if (!text || text.length > 300) return;
+    const key = [currentUser, to].sort().join("_");
+    if (!dms[key]) dms[key] = [];
+    const msg = { from: currentUser, to, text, avatar: users[currentUser].avatar, time: Date.now() };
+    dms[key].push(msg);
+    io.to(to).to(currentUser).emit("dm", msg);
+  });
 
-    // send only to to/from
-    for (let [id, s] of io.of("/").sockets) {
-      if (s.username === to || s.username === from) {
-        s.emit("dmMessage", msgObj);
-      }
-    }
+  // Friend request
+  socket.on("addFriend", (friend) => {
+    if (!users[currentUser] || !users[friend]) return;
+    let list = users[currentUser].friends;
+    if (!list.includes(friend)) list.push(friend);
+    users[currentUser].friends = [...new Set(list)];
+    socket.emit("friendsUpdated", users[currentUser].friends.map(f => ({ username: f, avatar: users[f].avatar })));
+  });
+
+  socket.on("getFriends", () => {
+    if (!users[currentUser]) return;
+    socket.emit("friendsUpdated", users[currentUser].friends.map(f => ({ username: f, avatar: users[f].avatar })));
   });
 });
 
-// --- Start server ---
-const PORT = process.env.PORT || 3000;
-httpServer.listen(PORT, ()=> console.log(`Server running on port ${PORT}`));
+httpServer.listen(PORT, () => console.log("Server running on " + PORT));
