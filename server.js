@@ -22,19 +22,20 @@ app.use(session({
   saveUninitialized: false
 }));
 
-// --- In-memory storage ---
-const users = {}; // { username: { password, avatar, friends: [], starredRooms: [], createdAt } }
-const friendRequests = {}; // { username: [fromUser1, fromUser2] }
-const rooms = {}; // { roomId: { name, password, inviteOnly, users: [], messages: [] } }
-const dms = {}; // { "userA_userB": [{ sender, message, avatar, id }] }
+// --- Persistent storage (replace with database for production) ---
+const users = {}; 
+// { username: { password, avatar, friends: [], createdAt, starredRooms: [] } }
+const friendRequests = {}; 
+const rooms = {}; 
+const dms = {}; 
 
-// --- Auth middleware ---
+// --- Middleware ---
 function checkAuth(req,res,next){
   if(!req.session.user) return res.status(401).json({ loggedIn:false });
   next();
 }
 
-// --- Auth routes ---
+// --- Auth ---
 app.post("/login", (req,res)=>{
   const { username, password } = req.body;
   if(!users[username] || users[username].password !== password)
@@ -50,25 +51,29 @@ app.post("/signup", (req,res)=>{
     password, 
     avatar: avatar || "/default.png", 
     friends: [], 
-    starredRooms: [], 
-    createdAt: Date.now() 
+    createdAt: Date.now(),
+    starredRooms: []
   };
   friendRequests[username] = [];
   req.session.user = username;
   res.json({ success:true });
 });
 
-app.post("/logout", (req,res)=>{
-  req.session.destroy(()=> res.json({ success:true }));
-});
+app.post("/logout", (req,res)=> req.session.destroy(()=> res.json({ success:true })) );
 
 app.get("/me", (req,res)=>{
   if(!req.session.user) return res.json({ loggedIn:false });
   const u = users[req.session.user];
-  res.json({ loggedIn:true, username:req.session.user, admin:u.admin||false, avatar:u.avatar, starredRooms:u.starredRooms||[] });
+  res.json({ 
+    loggedIn:true, 
+    username:req.session.user, 
+    admin:u.admin||false, 
+    avatar:u.avatar, 
+    starredRooms:u.starredRooms 
+  });
 });
 
-// --- Update avatar via URL ---
+// --- Avatar ---
 app.post("/update-avatar", checkAuth, (req,res)=>{
   const { avatarUrl } = req.body;
   if(!avatarUrl) return res.json({ success:false, message:"No avatar provided" });
@@ -80,16 +85,13 @@ app.post("/update-avatar", checkAuth, (req,res)=>{
 app.get("/friends", checkAuth, (req,res)=>{
   const username = req.session.user;
   const reqs = friendRequests[username] || [];
-  const uniqueFriends = [...new Set(users[username].friends)]; // remove duplicates
-  users[username].friends = uniqueFriends;
-
-  const friendsList = uniqueFriends.map(f => ({
+  const friendsList = [...new Set(users[username].friends)].map(f => ({
     username:f,
     avatar:users[f]?.avatar || '/default.png'
   }));
 
   const recentUsers = Object.entries(users)
-    .filter(([name]) => name !== username && !uniqueFriends.includes(name))
+    .filter(([name]) => name !== username && !users[username].friends.includes(name))
     .sort((a,b) => b[1].createdAt - a[1].createdAt)
     .slice(0,10)
     .map(([name,data]) => ({ username:name, avatar:data.avatar || '/default.png' }));
@@ -103,6 +105,12 @@ app.post("/friend-request", checkAuth, (req,res)=>{
   if(users[req.session.user].friends.includes(to)) return res.json({ success:false, message:"Already friends" });
   if(friendRequests[to].includes(req.session.user)) return res.json({ success:false, message:"Already requested" });
   friendRequests[to].push(req.session.user);
+
+  // live update to target if online
+  for (let [id, s] of io.of("/").sockets) {
+    if (s.username === to) s.emit("friendRequest", req.session.user);
+  }
+
   res.json({ success:true });
 });
 
@@ -112,8 +120,15 @@ app.post("/accept-request", checkAuth, (req,res)=>{
   const idx = friendRequests[username].indexOf(from);
   if(idx>-1){
     friendRequests[username].splice(idx,1);
-    if(!users[username].friends.includes(from)) users[username].friends.push(from);
-    if(!users[from].friends.includes(username)) users[from].friends.push(username);
+    users[username].friends.push(from);
+    users[from].friends.push(username);
+
+    // live updates
+    for (let [id, s] of io.of("/").sockets) {
+      if (s.username === from || s.username === username) {
+        s.emit("friendsUpdate");
+      }
+    }
   }
   res.json({ success:true });
 });
@@ -134,25 +149,18 @@ app.post("/create-room", checkAuth, (req,res)=>{
   res.json({ success:true, roomId });
 });
 
+app.post("/star-room", checkAuth, (req,res)=>{
+  const { roomId } = req.body;
+  if(!rooms[roomId]) return res.json({ success:false, message:"Room not found" });
+  const user = users[req.session.user];
+  if(!user.starredRooms.includes(roomId)) user.starredRooms.push(roomId);
+  res.json({ success:true, starred:user.starredRooms });
+});
+
 app.get("/room-info/:roomId", checkAuth, (req,res)=>{
   const r = rooms[req.params.roomId];
   if(!r) return res.json({ success:false });
   res.json({ success:true, name:r.name });
-});
-
-// --- Star/unstar room ---
-app.post("/star-room", checkAuth, (req,res)=>{
-  const { roomId } = req.body;
-  const starred = users[req.session.user].starredRooms || [];
-  if(!rooms[roomId]) return res.json({ success:false, message:"Room not found" });
-
-  if(starred.includes(roomId)){
-    users[req.session.user].starredRooms = starred.filter(r => r!==roomId);
-    res.json({ success:true, starred:false });
-  } else {
-    users[req.session.user].starredRooms.push(roomId);
-    res.json({ success:true, starred:true });
-  }
 });
 
 // --- DMs ---
@@ -165,10 +173,11 @@ app.get("/dm/:friend", checkAuth, (req,res)=>{
 
 // --- Socket.io ---
 io.on("connection", socket=>{
-  let username = null;
+  socket.on("registerUser", name=>{
+    socket.username = name;
+  });
 
-  socket.on("registerUser", name=>{ username=name; });
-
+  // Rooms
   socket.on("joinRoom", ({roomId,username:user})=>{
     socket.join(roomId);
     if(!rooms[roomId].users.includes(user)) rooms[roomId].users.push(user);
@@ -176,7 +185,7 @@ io.on("connection", socket=>{
   });
 
   socket.on("roomMessage", ({roomId,username:sender,message})=>{
-    if(message.length>300) message=message.slice(0,300); // limit 300
+    if(message.length>300) return; // limit
     const avatar = users[sender]?.avatar || '/default.png';
     const msgObj = { id:crypto.randomBytes(4).toString("hex"), sender, message, avatar };
     if(!rooms[roomId].messages) rooms[roomId].messages=[];
@@ -184,13 +193,21 @@ io.on("connection", socket=>{
     io.to(roomId).emit("roomMessage", msgObj);
   });
 
+  // DMs
   socket.on("dmMessage", ({to,from,message})=>{
+    if(message.length>300) return;
     const key = [to,from].sort().join("_");
     const avatar = users[from]?.avatar || '/default.png';
     const msgObj = { id:crypto.randomBytes(4).toString("hex"), sender:from, message, avatar };
     if(!dms[key]) dms[key]=[];
     dms[key].push(msgObj);
-    io.emit("dmMessage", msgObj);
+
+    // send only to to/from
+    for (let [id, s] of io.of("/").sockets) {
+      if (s.username === to || s.username === from) {
+        s.emit("dmMessage", msgObj);
+      }
+    }
   });
 });
 
