@@ -1,36 +1,23 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
-  <meta charset="utf-8" />
-  <title>Sign up</title>
-  <link rel="stylesheet" href="/style.css">
-</head>
+<head><meta charset="utf-8"><title>Sign up</title><link rel="stylesheet" href="/style.css"></head>
 <body>
-  <div style="height:100vh;display:flex;align-items:center;justify-content:center;">
-    <div style="width:380px;background:rgba(255,255,255,0.02);padding:26px;border-radius:12px;">
-      <h2 style="margin:0 0 14px 0;color:#fff">Create account</h2>
-      <div class="kv">
-        <input id="username" placeholder="Username">
-        <input id="password" type="password" placeholder="Password">
-      </div>
-      <div style="display:flex;gap:10px">
-        <button onclick="doSignup()" style="flex:1">Sign up</button>
-        <button onclick="location.href='/login.html'" style="background:#333;color:#fff">Login</button>
-      </div>
-      <p id="err" class="small" style="margin-top:10px;color:#ff8888"></p>
-    </div>
+  <div class="auth-box">
+    <h2>Sign up</h2>
+    <input id="username" placeholder="Username">
+    <input id="password" placeholder="Password" type="password">
+    <button id="signupBtn">Create account</button>
+    <p>Already have an account? <a href="/login.html">Login</a></p>
   </div>
 <script>
-async function doSignup(){
-  const u=document.getElementById('username').value.trim();
-  const p=document.getElementById('password').value;
-  const err=document.getElementById('err'); err.textContent='';
-  if(!u||!p){ err.textContent='Please fill fields'; return; }
-  const res=await fetch('/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});
-  const j = await res.json().catch(()=>null);
-  if(res.ok && j?.ok){ localStorage.setItem('user',u); location.href='/'; }
-  else err.textContent = (await res.text()) || 'Signup failed';
-}
+document.getElementById('signupBtn').onclick = async ()=>{
+  const u = document.getElementById('username').value.trim();
+  const p = document.getElementById('password').value;
+  const res = await fetch('/signup', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ username: u, password: p })});
+  const j = await res.json();
+  if (j.success) location.href = '/index.html';
+  else alert(j.message || 'Signup failed');
+};
 </script>
 </body>
 </html>
