@@ -5,6 +5,23 @@
 <title>Epick Chat</title>
 <link rel="stylesheet" href="/style.css">
 <script src="/socket.io/socket.io.js"></script>
+<style>
+  /* minimal loader & overlay CSS for demo */
+  .loader-overlay { position: fixed; inset:0; background:#fff; display:flex; justify-content:center; align-items:center; z-index:9999; }
+  .loader-box { text-align:center; }
+  .spinner { width:40px;height:40px;border:4px solid #ccc;border-top-color:#333;border-radius:50%;animation:spin 1s linear infinite; margin:auto; }
+  @keyframes spin { 0%{transform:rotate(0deg);}100%{transform:rotate(360deg);} }
+  .hidden { display:none !important; }
+  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#333; color:#fff; padding:8px 16px; border-radius:5px; opacity:0; transition:0.3s; z-index:10000; }
+  .toast.visible { opacity:1; }
+  .chat-overlay { position:fixed; inset:0; background:#fff; display:flex; flex-direction:column; z-index:1000; }
+  .chat-header { display:flex; justify-content:space-between; padding:8px; background:#eee; }
+  .chat-messages { flex:1; overflow-y:auto; padding:8px; }
+  .chat-input { display:flex; padding:8px; }
+  .chat-input input { flex:1; padding:4px; }
+  .list-item { padding:4px; border-bottom:1px solid #ddd; cursor:pointer; display:flex; align-items:center; justify-content:space-between; }
+  .list-item img.pfp { width:24px; height:24px; border-radius:50%; margin-right:8px; }
+</style>
 </head>
 <body>
   <div id="loader" class="loader-overlay">
@@ -78,9 +95,8 @@
 (async function(){
   const socket = io();
   let me = null;
-  let current = null; // { type: 'room'|'dm', id: ... }
+  let current = null;
 
-  // DOM
   const loader = document.getElementById('loader');
   const accountBtn = document.getElementById('accountBtn');
   const logoutBtn = document.getElementById('logoutBtn');
@@ -110,7 +126,6 @@
     setTimeout(()=> t.remove(), 3200);
   }
 
-  // Tab switching
   tabs.forEach(tab=>{
     tab.addEventListener('click', ()=> {
       tabs.forEach(t=>t.classList.remove('active'));
@@ -126,218 +141,192 @@
     location.href = '/login.html';
   };
 
-  // initialize
   async function init(){
-    const res = await fetch('/me');
-    const data = await res.json();
-    if (!data.loggedIn) return location.href = '/login.html';
-    me = data.username;
-    socket.emit('registerUser', me);
+    try {
+      const res = await fetch('/me');
+      const data = await res.json();
+      if (!data.loggedIn) return location.href = '/login.html';
+      me = data.username;
+      socket.emit('registerUser', me);
 
-    // load lists
-    await loadFriendsAndRecent();
-    await loadRooms();
+      await loadFriendsAndRecent();
+      await loadRooms();
+      await loadDMList();
 
-    // handle invite param (?invite=roomId)
-    const url = new URL(location.href);
-    const invite = url.searchParams.get('invite');
-    if (invite) {
-      const ri = await fetch(`/room-info/${invite}`).then(r=>r.json());
-      if (ri.success) openRoom(invite,ri.name);
-      else showToast('Invalid invite link');
+      const url = new URL(location.href);
+      const invite = url.searchParams.get('invite');
+      if (invite) {
+        const ri = await fetch(`/room-info/${invite}`).then(r=>r.json());
+        if (ri.success) openRoom(invite,ri.name);
+        else showToast('Invalid invite link');
+      }
+    } catch(err){
+      console.error(err);
+      showToast('Failed to initialize');
+    } finally {
+      loader.classList.add('hidden');
     }
-
-    setTimeout(()=> loader.classList.add('hidden'), 250);
   }
 
-  // FRIENDS & RECENT
   async function loadFriendsAndRecent(){
-    const res = await fetch('/friends');
-    const data = await res.json();
+    try {
+      const res = await fetch('/friends');
+      const data = await res.json();
 
-    // requests
-    friendRequestsDiv.innerHTML = '';
-    (data.requests || []).forEach(r=>{
-      const el = document.createElement('div'); el.className='list-item';
-      el.innerHTML = `<span>${r}</span> <button>Accept</button>`;
-      el.querySelector('button').onclick = async ()=> {
-        await fetch('/accept-request', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ from: r })});
-        socket.emit('fetchFriends');
-        showToast('Friend accepted');
-        await loadFriendsAndRecent();
-      };
-      friendRequestsDiv.appendChild(el);
-    });
+      friendRequestsDiv.innerHTML = '';
+      (data.requests || []).forEach(r=>{
+        const el = document.createElement('div'); el.className='list-item';
+        el.innerHTML = `<span>${r}</span> <button>Accept</button>`;
+        el.querySelector('button').onclick = async ()=>{
+          await fetch('/accept-request', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ from: r })});
+          socket.emit('fetchFriends');
+          showToast('Friend accepted');
+          await loadFriendsAndRecent();
+        };
+        friendRequestsDiv.appendChild(el);
+      });
 
-    // friends
-    friendsListDiv.innerHTML = '';
-    const seen = new Set();
-    (data.friends || []).forEach(f=>{
-      if (seen.has(f.username)) return;
-      seen.add(f.username);
-      const el = document.createElement('div'); el.className='list-item';
-      el.innerHTML = `<img src="${f.avatar}" class="pfp"> <span>${f.username}</span>`;
-      el.onclick = ()=> openDM(f.username);
-      friendsListDiv.appendChild(el);
-    });
+      friendsListDiv.innerHTML = '';
+      const seen = new Set();
+      (data.friends || []).forEach(f=>{
+        if (seen.has(f.username)) return;
+        seen.add(f.username);
+        const el = document.createElement('div'); el.className='list-item';
+        el.innerHTML = `<img src="${f.avatar}" class="pfp"> <span>${f.username}</span>`;
+        el.onclick = ()=> openDM(f.username);
+        friendsListDiv.appendChild(el);
+      });
 
-    // recent users
-    recentUsersDiv.innerHTML = '';
-    (data.recent || []).forEach(u=>{
-      const el = document.createElement('div'); el.className='list-item';
-      el.innerHTML = `<img src="${u.avatar}" class="pfp"> <span>${u.username}</span> <button>Add</button>`;
-      el.querySelector('button').onclick = async (e)=> {
-        e.stopPropagation();
-        const resp = await fetch('/friend-request', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ to: u.username })});
-        const json = await resp.json();
-        showToast(json.success ? 'Request sent' : json.message || 'Error');
-        await loadFriendsAndRecent();
-      };
-      recentUsersDiv.appendChild(el);
-    });
+      recentUsersDiv.innerHTML = '';
+      (data.recent || []).forEach(u=>{
+        const el = document.createElement('div'); el.className='list-item';
+        el.innerHTML = `<img src="${u.avatar}" class="pfp"> <span>${u.username}</span> <button>Add</button>`;
+        el.querySelector('button').onclick = async (e)=>{
+          e.stopPropagation();
+          const resp = await fetch('/friend-request', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ to: u.username })});
+          const json = await resp.json();
+          showToast(json.success ? 'Request sent' : json.message || 'Error');
+          await loadFriendsAndRecent();
+        };
+        recentUsersDiv.appendChild(el);
+      });
+
+    } catch(e){ console.error(e); showToast('Failed to load friends'); }
   }
 
-  // ROOMS
   async function loadRooms(){
-    const res = await fetch('/rooms');
-    const data = await res.json();
-    roomsListDiv.innerHTML = '';
-    Object.entries(data).forEach(([id, r])=>{
-      const el = document.createElement('div'); el.className='list-item';
-      el.innerHTML = `<span>${r.name}</span> <button>Join</button>`;
-      el.querySelector('button').onclick = ()=> openRoom(id, r.name);
-      roomsListDiv.appendChild(el);
-    });
+    try {
+      const res = await fetch('/rooms');
+      const data = await res.json();
+      roomsListDiv.innerHTML = '';
+      Object.entries(data).forEach(([id,r])=>{
+        const el = document.createElement('div'); el.className='list-item';
+        el.innerHTML = `<span>${r.name}</span> <button>Join</button>`;
+        el.querySelector('button').onclick = ()=> openRoom(id, r.name);
+        roomsListDiv.appendChild(el);
+      });
+    } catch(e){ console.error(e); showToast('Failed to load rooms'); }
   }
 
-  // Create room
+  async function loadDMList(){
+    try {
+      dmListDiv.innerHTML = '';
+      const res = await fetch('/friends');
+      const data = await res.json();
+      (data.friends||[]).forEach(f=>{
+        const el = document.createElement('div'); el.className='list-item';
+        el.innerHTML = `<span>@ ${f.username}</span>`;
+        el.onclick = ()=> openDM(f.username);
+        dmListDiv.appendChild(el);
+      });
+    } catch(e){ console.error(e); showToast('Failed to load DMs'); }
+  }
+
   document.getElementById('createRoomBtn').onclick = async ()=>{
     const name = document.getElementById('roomName').value.trim();
     if (!name) return showToast('Enter room name');
     const res = await fetch('/create-room', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name })});
     const j = await res.json();
-    if (j.success) {
+    if (j.success){
       showToast('Room created');
       await loadRooms();
-      // open new room
       openRoom(j.roomId, name);
-      // update global rooms for everyone
       socket.emit('roomsUpdated');
     } else showToast(j.message || 'Error');
   };
 
-  // OPEN ROOM overlay
   function openRoom(id, name){
-    current = { type: 'room', id };
+    current = { type:'room', id };
     chatTitle.textContent = `# ${name}`;
     chatMessages.innerHTML = '';
     chatOverlay.classList.remove('hidden');
-    // ask server for chat history
-    socket.emit('joinRoom', { roomId: id });
+    socket.emit('joinRoom', { roomId:id });
   }
 
-  // OPEN DM overlay
   async function openDM(username){
-    current = { type: 'dm', id: username };
+    current = { type:'dm', id:username };
     chatTitle.textContent = `@ ${username}`;
     chatMessages.innerHTML = '';
     chatOverlay.classList.remove('hidden');
-    // fetch DM history
-    const r = await fetch(`/dm/${username}`);
-    const j = await r.json();
-    if (j.success) {
-      (j.messages || []).forEach(m => appendMessage(m));
-    }
+    try {
+      const r = await fetch(`/dm/${username}`);
+      const j = await r.json();
+      if(j.success){ (j.messages||[]).forEach(m=> appendMessage(m)); }
+    } catch(e){ console.error(e); showToast('Failed to load DM'); }
   }
 
-  // append message to overlay
   function appendMessage(m){
-    const el = document.createElement('div'); el.className = 'chat-message';
+    const el = document.createElement('div'); el.className='chat-message';
     const av = document.createElement('img'); av.src = m.avatar || '/avatars/default.png'; av.className='pfp';
     const txt = document.createElement('div');
-    txt.innerHTML = `<b>${m.sender}</b> <div class="msg-text">${escapeHtml(m.message||m.text||m.msg||'')}</div>`;
-    el.appendChild(av); el.appendChild(txt); chatMessages.appendChild(el);
+    txt.innerHTML = `<b>${escapeHtml(m.sender)}</b> <div class="msg-text">${escapeHtml(m.message||m.text||m.msg||'')}</div>`;
+    el.appendChild(av); el.appendChild(txt);
+    chatMessages.appendChild(el);
     chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 
-  // send button / enter
   sendBtn.onclick = async ()=>{
     const txt = chatInput.value.trim();
-    if (!txt) return;
-    if (txt.length > 300) return showToast('Messages limited to 300 chars');
-    if (!current) return;
-    if (current.type === 'room') {
-      socket.emit('roomMessage', { roomId: current.id, message: txt });
-    } else {
-      socket.emit('dmMessage', { to: current.id, message: txt });
-    }
+    if(!txt) return;
+    if(txt.length>300) return showToast('Messages limited to 300 chars');
+    if(!current) return;
+    if(current.type==='room') socket.emit('roomMessage',{ roomId: current.id, message: txt });
+    else socket.emit('dmMessage',{ to: current.id, message: txt });
     chatInput.value = '';
   };
-  chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendBtn.click(); });
+  chatInput.addEventListener('keydown', e=>{ if(e.key==='Enter') sendBtn.click(); });
 
-  // close overlay
-  closeChatBtn.onclick = ()=> { chatOverlay.classList.add('hidden'); current = null; };
+  closeChatBtn.onclick = ()=>{ chatOverlay.classList.add('hidden'); current=null; };
 
-  // socket handlers
-  socket.on('chatHistory', msgs => {
-    chatMessages.innerHTML = '';
-    (msgs || []).forEach(m => appendMessage(m));
-  });
-  socket.on('roomMessage', m => {
-    if (current && current.type === 'room' && current.id === m.roomId) appendMessage(m);
-  });
-  socket.on('dmMessage', m => {
-    if (current && current.type === 'dm' && current.id === m.sender) appendMessage(m);
-    else showToast(`New DM from ${m.sender}`);
-  });
+  socket.on('chatHistory', msgs=>{ chatMessages.innerHTML=''; (msgs||[]).forEach(m=>appendMessage(m)); });
+  socket.on('roomMessage', m=>{ if(current?.type==='room' && current.id===m.roomId) appendMessage(m); });
+  socket.on('dmMessage', m=>{ if(current?.type==='dm' && current.id===m.sender) appendMessage(m); else showToast(`New DM from ${m.sender}`); });
+  socket.on('dmNotification', ({from})=>{ showToast(`New DM from ${from}`); });
+  socket.on('friendRequest', (from)=>{ showToast(`Friend request from ${from}`); loadFriendsAndRecent(); });
+  socket.on('friendsUpdate', ()=>{ loadFriendsAndRecent(); loadDMList(); });
+  socket.on('roomsUpdated', ()=>{ loadRooms(); });
 
-  socket.on('dmNotification', ({ from }) => {
-    showToast(`New DM from ${from}`);
-  });
+  socket.on('connect', ()=>{ socket.emit('fetchFriends'); });
 
-  socket.on('friendRequest', (from) => {
-    showToast(`Friend request from ${from}`);
-    loadFriendsAndRecent(); // refresh UI
-  });
+  function escapeHtml(s){ return (s||'').toString().replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-  socket.on('friendsUpdate', () => {
-    loadFriendsAndRecent();
-  });
-
-  socket.on('roomsUpdated', () => {
-    loadRooms();
-  });
-
-  socket.on('connect', ()=> {
-    // fetch friends after connect
-    socket.emit('fetchFriends');
-  });
-
-  // helper: escape html to avoid injection
-  function escapeHtml(s){
-    return (s||'').toString().replace(/[&<>"']/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  }
-
-  // search
   document.getElementById('searchBtn').onclick = async ()=>{
     const q = document.getElementById('searchUser').value.trim();
-    if (!q) return showToast('Enter username');
+    if(!q) return showToast('Enter username');
     const container = document.getElementById('recentUsers');
     container.innerHTML = '';
     const el = document.createElement('div'); el.className='list-item';
-    el.innerHTML = `<span>${q}</span> <button>Add</button>`;
+    el.innerHTML = `<span>${escapeHtml(q)}</span> <button>Add</button>`;
     el.querySelector('button').onclick = async ()=>{
-      const resp = await fetch('/friend-request', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ to: q })});
+      const resp = await fetch('/friend-request', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ to:q })});
       const j = await resp.json();
-      showToast(j.success ? 'Request sent' : j.message || 'Error');
+      showToast(j.success?'Request sent':j.message||'Error');
       await loadFriendsAndRecent();
     };
     container.appendChild(el);
   };
 
-  // initial
   await init();
-
 })();
 </script>
 </body>
