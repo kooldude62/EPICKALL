@@ -1,55 +1,60 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Account Settings</title>
-<style>
-body { background:#2c2f33; color:#fff; font-family:Arial, sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; margin:0; }
-.container { background:#23272a; padding:30px; border-radius:10px; width:350px; text-align:center; }
-#pfp { width:100px; height:100px; border-radius:50%; object-fit:cover; border:3px solid #5865f2; margin-bottom:15px; }
-input { width:100%; padding:8px; margin-bottom:10px; border-radius:5px; border:none; }
-button { width:100%; padding:10px; border:none; border-radius:5px; background:#5865f2; color:#fff; font-weight:bold; cursor:pointer; }
-button:hover { background:#4752c4; }
-</style>
+<meta charset="utf-8" />
+<title>Account - EpickChat</title>
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<div class="container">
-<h2>Account Settings</h2>
-<img id="pfp" src="/default.png">
+  <div class="account-container">
+    <h2>Account Settings</h2>
+    <img id="pfp" src="/avatars/default.png" class="avatar-large" alt="avatar">
+    <form id="avatarForm">
+      <label>Upload avatar (image / gif)</label>
+      <input type="file" id="avatarFile" name="avatar" accept="image/*">
+      <button type="button" id="uploadBtn">Upload</button>
+    </form>
 
-<form id="avatarForm">
-<input type="text" id="avatarUrl" placeholder="Avatar URL (GIF/PNG/JPG)" required>
-<button type="submit">Update Avatar</button>
-</form>
+    <div>
+      <label>Or use image/GIF URL</label>
+      <input id="avatarUrl" placeholder="https://...gif or .png or .jpg">
+      <button id="setUrlBtn">Set from URL</button>
+    </div>
 
-<button onclick="window.location.href='/index.html'">Back to Chat</button>
-</div>
+    <div>
+      <button onclick="location.href='/index.html'">Back to Chat</button>
+    </div>
+  </div>
 
 <script>
-async function init(){
-  const res = await fetch("/me");
-  const data = await res.json();
-  if(!data.loggedIn) return window.location.href="/login.html";
-  document.getElementById("pfp").src = data.avatar || "/default.png";
-}
+(async ()=>{
+  const res = await fetch('/me'); const data = await res.json();
+  if (!data.loggedIn) location.href = '/login.html';
+  document.getElementById('pfp').src = data.avatar || '/avatars/default.png';
 
-document.getElementById("avatarForm").addEventListener("submit", async (e)=>{
-  e.preventDefault();
-  const avatarUrl = document.getElementById("avatarUrl").value.trim();
-  if(!avatarUrl) return alert("Enter avatar URL");
-  const res = await fetch("/update-avatar", {
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({ avatarUrl })
-  });
-  const data = await res.json();
-  if(data.success){
-    document.getElementById("pfp").src = data.avatar;
-    alert("Avatar updated!");
-  } else alert(data.message || "Upload failed");
-});
+  document.getElementById('uploadBtn').onclick = async ()=>{
+    const file = document.getElementById('avatarFile').files[0];
+    if (!file) return alert('Choose a file');
+    const fd = new FormData(); fd.append('avatar', file);
+    const r = await fetch('/update-avatar', { method:'POST', body: fd });
+    const j = await r.json();
+    if (j.success) {
+      document.getElementById('pfp').src = j.avatar;
+      alert('Avatar updated');
+    } else alert(j.message || 'Failed');
+  };
 
-init();
+  document.getElementById('setUrlBtn').onclick = async ()=>{
+    const url = document.getElementById('avatarUrl').value.trim();
+    if (!url) return alert('Enter URL');
+    const r = await fetch('/update-avatar', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ avatarUrl: url })});
+    const j = await r.json();
+    if (j.success) {
+      document.getElementById('pfp').src = j.avatar;
+      alert('Avatar updated');
+    } else alert(j.message || 'Failed');
+  };
+})();
 </script>
 </body>
 </html>
