@@ -1,143 +1,376 @@
+// server.js
 import express from "express";
 import session from "express-session";
 import bodyParser from "body-parser";
-import bcrypt from "bcrypt";
-import { Server } from "socket.io";
 import { createServer } from "http";
+import { Server } from "socket.io";
 import multer from "multer";
 import path from "path";
+import { fileURLToPath } from "url";
 import fs from "fs";
+import crypto from "crypto";
+import bcrypt from "bcryptjs";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const DATA_FILE = path.join(__dirname, "data.json");
+const AVATAR_DIR = path.join(__dirname, "public", "avatars");
+if (!fs.existsSync(AVATAR_DIR)) fs.mkdirSync(AVATAR_DIR, { recursive: true });
+
+// load / save helpers
+function loadData() {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const raw = fs.readFileSync(DATA_FILE, "utf8");
+      return JSON.parse(raw);
+    }
+  } catch (e) {
+    console.error("Failed to load data.json", e);
+  }
+  // initial structure
+  return { users: {}, friendRequests: {}, rooms: {}, dms: {} };
+}
+function saveData() {
+  try {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), "utf8");
+  } catch (e) {
+    console.error("Failed to save data.json", e);
+  }
+}
+
+const store = loadData(); // { users, friendRequests, rooms, dms }
 
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer);
 
-const PORT = process.env.PORT || 3000;
-
-// In-memory store (use MongoDB/SQLite for persistence in production)
-let users = {};
-let rooms = {};
-let dms = {}; // { userA_userB: [messages] }
-
-// Recent users
-let recentUsers = [];
-
-// Middleware
+// middleware
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(
-  session({
-    secret: "supersecret",
-    resave: false,
-    saveUninitialized: false,
-  })
-);
-app.use(express.static("public"));
+app.use(session({
+  secret: "supersecret",
+  resave: false,
+  saveUninitialized: false
+}));
+app.use(express.static(path.join(__dirname, "public")));
 
-// Multer setup for avatars
-const upload = multer({ dest: "public/avatars/" });
+// multer for avatar uploads
+const upload = multer({ dest: path.join(__dirname, "tmp_uploads") });
 
-// Routes
+// helper to generate id
+function genId() { return crypto.randomBytes(5).toString("hex"); }
+
+// Auth helper
+function requireAuth(req, res, next) {
+  if (!req.session.user) return res.status(401).json({ loggedIn: false });
+  return next();
+}
+
+// --- AUTH ROUTES ---
 app.post("/signup", async (req, res) => {
-  const { username, password } = req.body;
-  if (users[username]) return res.json({ success: false, message: "User exists" });
+  const { username, password, avatarUrl } = req.body;
+  if (!username || !password) return res.json({ success: false, message: "Missing fields" });
+  if (store.users[username]) return res.json({ success: false, message: "User exists" });
 
-  const hashed = await bcrypt.hash(password, 10);
-  users[username] = { username, password: hashed, avatar: "/default.png", friends: [], themes: [], starredRooms: [] };
-  req.session.user = users[username];
-
-  recentUsers.unshift(username);
-  if (recentUsers.length > 10) recentUsers.pop();
-
+  const hash = await bcrypt.hash(password, 10);
+  store.users[username] = {
+    username,
+    passwordHash: hash,
+    avatar: avatarUrl || "/avatars/default.png",
+    friends: [],
+    starredRooms: [],
+    createdAt: Date.now(),
+    admin: false
+  };
+  store.friendRequests[username] = store.friendRequests[username] || [];
+  saveData();
+  req.session.user = username;
   res.json({ success: true });
 });
 
 app.post("/login", async (req, res) => {
   const { username, password } = req.body;
-  const user = users[username];
-  if (!user) return res.json({ success: false, message: "Invalid credentials" });
-
-  const valid = await bcrypt.compare(password, user.password);
-  if (!valid) return res.json({ success: false, message: "Invalid credentials" });
-
-  req.session.user = user;
+  const u = store.users[username];
+  if (!u) return res.json({ success: false, message: "Invalid credentials" });
+  const ok = await bcrypt.compare(password, u.passwordHash);
+  if (!ok) return res.json({ success: false, message: "Invalid credentials" });
+  req.session.user = username;
   res.json({ success: true });
+});
+
+app.post("/logout", (req, res) => {
+  req.session.destroy(() => res.json({ success: true }));
 });
 
 app.get("/me", (req, res) => {
   if (!req.session.user) return res.json({ loggedIn: false });
-  res.json({ loggedIn: true, ...req.session.user });
+  const u = store.users[req.session.user];
+  if (!u) return res.json({ loggedIn: false });
+  res.json({
+    loggedIn: true,
+    username: u.username,
+    avatar: u.avatar,
+    starredRooms: u.starredRooms || [],
+    admin: !!u.admin
+  });
 });
 
-app.post("/update-avatar", upload.single("avatar"), (req, res) => {
-  if (!req.session.user) return res.status(401).json({ success: false, message: "Not logged in" });
-  if (!req.file) return res.status(400).json({ success: false, message: "No avatar provided" });
+// --- AVATAR UPDATE (file upload OR avatarUrl in body) ---
+app.post("/update-avatar", requireAuth, upload.single("avatar"), (req, res) => {
+  const username = req.session.user;
+  let avatarUrl = null;
 
-  const ext = path.extname(req.file.originalname);
-  const newPath = `public/avatars/${req.session.user.username}${ext}`;
-  fs.renameSync(req.file.path, newPath);
+  if (req.file) {
+    // move to public/avatars and name by username + ext
+    const ext = path.extname(req.file.originalname) || ".png";
+    const destName = `${username}_${Date.now()}${ext}`;
+    const destPath = path.join(AVATAR_DIR, destName);
+    try {
+      fs.renameSync(req.file.path, destPath);
+      avatarUrl = `/avatars/${destName}`;
+    } catch (e) {
+      console.error(e);
+      // fallback: remove temp
+      try { fs.unlinkSync(req.file.path); } catch {}
+      return res.json({ success: false, message: "Upload failed" });
+    }
+  } else if (req.body.avatarUrl) {
+    avatarUrl = req.body.avatarUrl;
+  } else {
+    return res.json({ success: false, message: "No avatar provided" });
+  }
 
-  req.session.user.avatar = `/avatars/${req.session.user.username}${ext}`;
-  users[req.session.user.username].avatar = req.session.user.avatar;
-
-  res.json({ success: true, avatar: req.session.user.avatar });
+  store.users[username].avatar = avatarUrl;
+  saveData();
+  return res.json({ success: true, avatar: avatarUrl });
 });
 
-// Recently joined
-app.get("/recent-users", (req, res) => {
-  res.json(recentUsers.map(u => ({ username: u, avatar: users[u]?.avatar || "/default.png" })));
+// serve default avatar into /public/avatars/default.png if not present
+const defaultAvatarPath = path.join(AVATAR_DIR, "default.png");
+if (!fs.existsSync(defaultAvatarPath)) {
+  // create a tiny placeholder (1x1 transparent png) - to avoid 404s
+  const emptyPNG = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=",
+    "base64"
+  );
+  fs.writeFileSync(defaultAvatarPath, emptyPNG);
+  // some users may still want to replace it manually
+}
+
+// --- FRIENDS ---
+app.get("/friends", requireAuth, (req, res) => {
+  const username = req.session.user;
+  const requests = store.friendRequests[username] || [];
+  // dedupe friend list
+  store.users[username].friends = Array.from(new Set(store.users[username].friends || []));
+  const friends = (store.users[username].friends || []).map(f => ({
+    username: f,
+    avatar: store.users[f]?.avatar || "/avatars/default.png"
+  }));
+
+  // 10 most recent users (exclude self & friends)
+  const recent = Object.values(store.users)
+    .filter(u => u.username !== username && !store.users[username].friends.includes(u.username))
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, 10)
+    .map(u => ({ username: u.username, avatar: u.avatar || "/avatars/default.png" }));
+
+  res.json({ requests, friends, recent });
 });
 
-// Socket.io
+app.post("/friend-request", requireAuth, (req, res) => {
+  const from = req.session.user;
+  const to = req.body.to;
+  if (!to || !store.users[to]) return res.json({ success: false, message: "User not found" });
+  if (to === from) return res.json({ success: false, message: "Can't friend yourself" });
+  store.friendRequests[to] = store.friendRequests[to] || [];
+  if (!store.friendRequests[to].includes(from) && !store.users[to].friends.includes(from)) {
+    store.friendRequests[to].push(from);
+    saveData();
+    // live notify recipient if online
+    io.to(to).emit("friendRequest", from);
+  }
+  return res.json({ success: true });
+});
+
+app.post("/accept-request", requireAuth, (req, res) => {
+  const username = req.session.user;
+  const from = req.body.from;
+  store.friendRequests[username] = store.friendRequests[username] || [];
+  const idx = store.friendRequests[username].indexOf(from);
+  if (idx > -1) {
+    store.friendRequests[username].splice(idx, 1);
+    // add mutual friendship, dedupe
+    store.users[username].friends = Array.from(new Set([...(store.users[username].friends||[]), from]));
+    store.users[from].friends = Array.from(new Set([...(store.users[from].friends||[]), username]));
+    saveData();
+    // notify both
+    io.to(from).emit("friendsUpdate");
+    io.to(username).emit("friendsUpdate");
+  }
+  return res.json({ success: true });
+});
+
+// --- ROOMS ---
+app.get("/rooms", requireAuth, (req, res) => {
+  const result = {};
+  for (const [id, r] of Object.entries(store.rooms)) {
+    result[id] = { name: r.name, inviteOnly: !!r.inviteOnly };
+  }
+  res.json(result);
+});
+
+app.post("/create-room", requireAuth, (req, res) => {
+  const { name, password, inviteOnly } = req.body;
+  if (!name || !name.trim()) return res.json({ success: false, message: "Room name required" });
+
+  // prevent duplicate names (case-insensitive)
+  const lower = name.trim().toLowerCase();
+  for (const r of Object.values(store.rooms)) {
+    if (r.name && r.name.trim().toLowerCase() === lower) {
+      return res.json({ success: false, message: "Room name already in use" });
+    }
+  }
+
+  const id = genId();
+  store.rooms[id] = { name: name.trim(), password: password || "", inviteOnly: !!inviteOnly, users: [], messages: [] };
+  saveData();
+  // broadcast rooms update
+  io.emit("roomsUpdated");
+  res.json({ success: true, roomId: id, inviteLink: `${req.protocol}://${req.get("host")}/?invite=${id}` });
+});
+
+app.get("/room-info/:roomId", requireAuth, (req, res) => {
+  const r = store.rooms[req.params.roomId];
+  if (!r) return res.json({ success: false });
+  res.json({ success: true, name: r.name });
+});
+
+// allow direct route /room/:id to serve the SPA (prevents 404 on direct link)
+app.get("/room/:roomId", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+// --- DM retrieval ---
+app.get("/dm/:friend", requireAuth, (req, res) => {
+  const me = req.session.user;
+  const friend = req.params.friend;
+  // only if they are friends (optional) - check existing friends
+  if (!store.users[friend]) return res.json({ success: false, message: "User not found" });
+  // if you want to restrict DMs to friends only, uncomment:
+  // if (!store.users[me].friends.includes(friend)) return res.json({ success:false, message:"Not friends" });
+  const key = [me, friend].sort().join("_");
+  res.json({ success: true, messages: store.dms[key] || [] });
+});
+
+// --- STAR ROOM ---
+app.post("/star-room", requireAuth, (req, res) => {
+  const { roomId } = req.body;
+  if (!roomId || !store.rooms[roomId]) return res.json({ success: false, message: "Room not found" });
+  const u = store.users[req.session.user];
+  u.starredRooms = u.starredRooms || [];
+  if (u.starredRooms.includes(roomId)) u.starredRooms = u.starredRooms.filter(r => r !== roomId);
+  else u.starredRooms.push(roomId);
+  saveData();
+  res.json({ success: true, starred: u.starredRooms });
+});
+
+// catch-all for SPA (so direct links still serve index)
+app.get("*", (req, res) => {
+  // only serve SPA for non-static file requests (so assets still are served)
+  if (req.path.startsWith("/api") || req.path.startsWith("/avatars") || req.path.includes(".")) {
+    return res.status(404).send("Not found");
+  }
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+// --- SOCKET.IO ---
+
 io.on("connection", (socket) => {
-  let currentUser;
-
-  socket.on("login", (username) => {
-    currentUser = username;
+  // when client registers (after login), it should send username
+  socket.on("registerUser", (username) => {
+    socket.username = username;
+    // join a personal room so we can emit to that user easily
     socket.join(username);
   });
 
-  // Rooms
-  socket.on("createRoom", (roomName) => {
-    if (!rooms[roomName]) rooms[roomName] = [];
-    io.emit("roomsUpdated", Object.keys(rooms));
+  // join room -> send chat history
+  socket.on("joinRoom", ({ roomId }) => {
+    if (!roomId || !store.rooms[roomId]) return;
+    socket.join(roomId);
+    const messages = store.rooms[roomId].messages || [];
+    // send history only to the joining socket
+    socket.emit("chatHistory", messages);
   });
 
-  socket.on("joinRoom", (roomName) => {
-    socket.join(roomName);
-    socket.emit("roomMessages", rooms[roomName] || []);
+  // room message
+  socket.on("roomMessage", ({ roomId, message }) => {
+    const sender = socket.username;
+    if (!sender || !roomId || !store.rooms[roomId] || !message) return;
+    // enforce length
+    const text = ("" + message).slice(0, 300);
+    const msgObj = {
+      id: genId(),
+      sender,
+      avatar: store.users[sender]?.avatar || "/avatars/default.png",
+      message: text,
+      time: Date.now(),
+      roomId
+    };
+    store.rooms[roomId].messages = store.rooms[roomId].messages || [];
+    store.rooms[roomId].messages.push(msgObj);
+    saveData();
+    // emit to all in the room
+    io.to(roomId).emit("roomMessage", msgObj);
   });
 
-  socket.on("roomMessage", ({ roomName, text }) => {
-    if (!text || text.length > 300) return;
-    const msg = { from: currentUser, text, avatar: users[currentUser].avatar, time: Date.now() };
-    rooms[roomName].push(msg);
-    io.to(roomName).emit("roomMessage", msg);
+  // dm message: send only to sender and recipient
+  socket.on("dmMessage", ({ to, message }) => {
+    const from = socket.username;
+    if (!from || !to || !store.users[to] || !message) return;
+    const text = ("" + message).slice(0, 300);
+    const msg = {
+      id: genId(),
+      sender: from,
+      avatar: store.users[from]?.avatar || "/avatars/default.png",
+      message: text,
+      time: Date.now()
+    };
+    const key = [from, to].sort().join("_");
+    store.dms[key] = store.dms[key] || [];
+    store.dms[key].push(msg);
+    saveData();
+    // emit only to the two users (they are in personal rooms named after their username)
+    io.to(to).emit("dmMessage", msg);
+    io.to(from).emit("dmMessage", msg);
+    // also notify recipient
+    io.to(to).emit("dmNotification", { from });
   });
 
-  // DMs
-  socket.on("dm", ({ to, text }) => {
-    if (!text || text.length > 300) return;
-    const key = [currentUser, to].sort().join("_");
-    if (!dms[key]) dms[key] = [];
-    const msg = { from: currentUser, to, text, avatar: users[currentUser].avatar, time: Date.now() };
-    dms[key].push(msg);
-    io.to(to).to(currentUser).emit("dm", msg);
+  // friend request via socket (optional)
+  socket.on("sendFriendRequest", async (to) => {
+    const from = socket.username;
+    if (!from || !to || !store.users[to]) return;
+    store.friendRequests[to] = store.friendRequests[to] || [];
+    if (!store.friendRequests[to].includes(from) && !store.users[to].friends.includes(from)) {
+      store.friendRequests[to].push(from);
+      saveData();
+      io.to(to).emit("friendRequest", from);
+    }
   });
 
-  // Friend request
-  socket.on("addFriend", (friend) => {
-    if (!users[currentUser] || !users[friend]) return;
-    let list = users[currentUser].friends;
-    if (!list.includes(friend)) list.push(friend);
-    users[currentUser].friends = [...new Set(list)];
-    socket.emit("friendsUpdated", users[currentUser].friends.map(f => ({ username: f, avatar: users[f].avatar })));
+  // request to refresh friends
+  socket.on("fetchFriends", () => {
+    const u = socket.username;
+    if (!u || !store.users[u]) return;
+    socket.emit("friendsData", {
+      requests: store.friendRequests[u] || [],
+      friends: (store.users[u].friends || []).map(f => ({ username: f, avatar: store.users[f]?.avatar || "/avatars/default.png" }))
+    });
   });
 
-  socket.on("getFriends", () => {
-    if (!users[currentUser]) return;
-    socket.emit("friendsUpdated", users[currentUser].friends.map(f => ({ username: f, avatar: users[f].avatar })));
-  });
 });
 
-httpServer.listen(PORT, () => console.log("Server running on " + PORT));
+const PORT = process.env.PORT || 3000;
+httpServer.listen(PORT, () => console.log(`Server listening on ${PORT}`));
