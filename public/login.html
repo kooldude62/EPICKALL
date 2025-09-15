@@ -1,40 +1,23 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Login / Signup</title>
-<link rel="stylesheet" href="style.css">
-</head>
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Login</title><link rel="stylesheet" href="/style.css"></head>
 <body>
-<div class="auth-container">
-  <h2>Login</h2>
-  <input id="loginUsername" placeholder="Username">
-  <input id="loginPassword" placeholder="Password" type="password">
-  <button id="loginBtn">Login</button>
-
-  <h2>Signup</h2>
-  <input id="signupUsername" placeholder="Username">
-  <input id="signupPassword" placeholder="Password" type="password">
-  <button id="signupBtn">Signup</button>
-</div>
+  <div class="auth-box">
+    <h2>Login</h2>
+    <input id="username" placeholder="Username">
+    <input id="password" placeholder="Password" type="password">
+    <button id="loginBtn">Login</button>
+    <p>Don't have an account? <a href="/signup.html">Sign up</a></p>
+  </div>
 <script>
-document.getElementById("loginBtn").addEventListener("click", async () => {
-  const username = document.getElementById("loginUsername").value;
-  const password = document.getElementById("loginPassword").value;
-  const res = await fetch("/login",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});
-  const data = await res.json();
-  if(data.success) window.location.href="/index.html";
-  else alert(data.message);
-});
-
-document.getElementById("signupBtn").addEventListener("click", async () => {
-  const username = document.getElementById("signupUsername").value;
-  const password = document.getElementById("signupPassword").value;
-  const res = await fetch("/signup",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});
-  const data = await res.json();
-  if(data.success) window.location.href="/index.html";
-  else alert(data.message);
-});
+document.getElementById('loginBtn').onclick = async ()=>{
+  const u = document.getElementById('username').value.trim();
+  const p = document.getElementById('password').value;
+  const res = await fetch('/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ username: u, password: p })});
+  const j = await res.json();
+  if (j.success) location.href = '/index.html';
+  else alert(j.message || 'Login failed');
+};
 </script>
 </body>
 </html>
