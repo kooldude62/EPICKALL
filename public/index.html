@@ -228,17 +228,53 @@
     chatMessages.innerHTML='';
     const r = await api(`/dm/${username}`);
     if(r && r.success) (r.messages||[]).forEach(m=>appendMessage(m));
+    chatOverlay.classList.remove('hidden'); chatOverlay.setAttribute('aria-hidden','false');
   }
 
-  function appendMessage(m){
-    if(!m || !m.id) return;
-    if(document.querySelector(`[data-msgid="${m.id}"]`)) return;
-    const el = document.createElement('div'); el.className='chat-message'+(m.sender===me?' me':'');
+  function createMessageElement(m){
+    const el = document.createElement('div');
+    el.className = 'chat-message' + (m.sender===me ? ' me' : '');
     el.dataset.msgid = m.id;
     const av = document.createElement('img'); av.src = m.avatar||'/avatars/default.png'; av.className='pfp';
     const bubble = document.createElement('div'); bubble.className='bubble';
     bubble.innerHTML = `<div style="font-size:12px;color:var(--muted)">${m.sender} • ${new Date(m.time||Date.now()).toLocaleString()}</div><div style="margin-top:6px">${escapeHtml(m.message||'')}</div>`;
     el.appendChild(av); el.appendChild(bubble);
+    return el;
+  }
+
+  function appendMessage(m){
+    if(!m || !m.id) return;
+
+    // if the exact id already exists, ignore
+    if(document.querySelector(`[data-msgid="${m.id}"]`)) return;
+
+    // try to find a temporary optimistic message to replace
+    const candidates = Array.from(chatMessages.querySelectorAll('.chat-message')).filter(n=>{
+      const id = n.dataset.msgid||'';
+      return id.startsWith('temp-') && n.classList.contains(m.sender===me ? 'me' : '') ;
+    });
+
+    for(const c of candidates){
+      // extract message text from bubble's second div
+      const bubble = c.querySelector('.bubble');
+      if(!bubble) continue;
+      const nodes = bubble.querySelectorAll('div');
+      const msgTextNode = nodes.length>1 ? nodes[1] : nodes[0];
+      const displayed = msgTextNode ? msgTextNode.innerText : '';
+      if(displayed === (m.message||'')){
+        // replace temp with real id and update timestamp/content
+        c.dataset.msgid = m.id;
+        c.querySelector('.bubble').innerHTML = `<div style="font-size:12px;color:var(--muted)">${m.sender} • ${new Date(m.time||Date.now()).toLocaleString()}</div><div style="margin-top:6px">${escapeHtml(m.message||'')}</div>`;
+        // update avatar if present
+        const img = c.querySelector('img.pfp');
+        if(img && m.avatar) img.src = m.avatar;
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        return;
+      }
+    }
+
+    // otherwise append new
+    const el = createMessageElement(m);
     chatMessages.appendChild(el);
     chatMessages.scrollTop = chatMessages.scrollHeight;
   }
@@ -250,7 +286,15 @@
     if(!current) return alert('Open a room or DM first');
 
     // optimistic append
-    const tempMsg = { sender: me, receiver: current.id, message: txt, id: 'temp-'+Date.now(), time: Date.now() };
+    const tempMsg = {
+      sender: me,
+      to: current.type==='dm' ? current.id : undefined,
+      receiver: current.type==='dm' ? current.id : undefined,
+      message: txt,
+      id: 'temp-'+Date.now(),
+      time: Date.now(),
+      avatar: null
+    };
     appendMessage(tempMsg);
 
     if(current.type==='room') socket.emit('roomMessage',{roomId:current.id,message:txt});
@@ -262,11 +306,33 @@
   sendBtn.onclick = sendMessage;
   chatInput.addEventListener('keydown', e=>{ if(e.key==='Enter') sendMessage(); });
 
-  socket.on('roomMessage', m => { if(current?.type==='room' && current.id===m.roomId) appendMessage(m); });
-  socket.on('dmMessage', m => { if(current?.type==='dm' && (current.id===m.sender || current.id===m.receiver)) appendMessage(m); });
+  // socket listeners
+  socket.on('chatHistory', (messages) => {
+    // replace whole view with history (server-sent)
+    chatMessages.innerHTML = '';
+    (messages||[]).forEach(m=>appendMessage(m));
+  });
+
+  socket.on('roomMessage', m => {
+    // append only when viewing same room
+    if(current?.type==='room' && current.id===m.roomId) appendMessage(m);
+  });
+
+  socket.on('dmMessage', m => {
+    // server's dm messages include 'to' (recipient) and 'sender'
+    if(current?.type==='dm' && (current.id===m.sender || current.id===m.to)) appendMessage(m);
+  });
+
   socket.on('friendRequest', from=>{ loadFriendsAndRecent(); alert('Friend request from '+from); });
   socket.on('friendsUpdate', ()=>{ loadFriendsAndRecent(); loadDMList(); });
   socket.on('roomsUpdated', ()=>loadRooms());
+  socket.on('dmNotification', ({from}) => {
+    // optional: notify when new DM arrives while not currently open
+    if(!(current?.type==='dm' && current.id===from)) {
+      // flash or alert
+      console.log('DM notification from', from);
+    }
+  });
 
   closeChatBtn.onclick = ()=>{ chatOverlay.classList.add('hidden'); chatOverlay.setAttribute('aria-hidden','true'); current=null; };
 
