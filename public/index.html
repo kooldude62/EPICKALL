@@ -1,336 +1,155 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
+<meta charset="UTF-8">
 <title>Epick Chat</title>
 <script src="/socket.io/socket.io.js"></script>
 <style>
-:root {
-  --bg: #0a0f25;
-  --panel: rgba(255,255,255,0.04);
-  --muted: rgba(255,255,255,0.6);
-  --accent: #4c8cff;
-  --glass: rgba(255,255,255,0.03);
-  --glass-2: rgba(255,255,255,0.02);
-  --unread: #4c8cff; /* Blue unread indicator */
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  font-family: Inter, system-ui, Segoe UI, Roboto, Arial;
-  background: linear-gradient(180deg,#071021,#0a0f25);
-  color: #e8eefc;
-  min-height: 100vh;
-}
-
-.navbar {
-  display: flex;
-  justify-content: space-between;
-  padding: 12px 20px;
-  background: var(--glass-2);
-  border-bottom: 1px solid rgba(255,255,255,0.02);
-}
-
-.tabs { display: flex; gap: 8px; margin: 16px; padding: 0 12px; }
-.tab {
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--glass-2);
-  cursor: pointer;
-  color: var(--muted);
-}
-.tab.active {
-  background: linear-gradient(90deg, rgba(76,140,255,0.12), rgba(76,140,255,0.06));
-  color: #fff;
-}
-
-main { display: grid; grid-template-columns: 360px 1fr; gap: 16px; padding: 18px; }
-
-.panel {
-  background: var(--panel);
-  border-radius: 12px;
-  padding: 12px;
-  min-height: 60vh;
-  display: none;
-  flex-direction: column;
-  gap: 12px;
-}
-.panel.active { display: flex; }
-
-.list { display: flex; flex-direction: column; gap: 6px; max-height: 56vh; overflow:auto; padding-right:6px; }
-
-.list-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px;
-  border-radius: 8px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));
-  cursor: pointer;
-  position: relative;
-}
-.list-item .unread-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--unread);
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: none;
-}
-
-.pfp { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; border: 1px solid rgba(255,255,255,0.04); }
-
-.chat-overlay {
-  position: fixed;
-  inset: 0;
-  background: linear-gradient(180deg, rgba(1,4,8,0.85), rgba(1,4,8,0.95));
-  display: flex;
-  flex-direction: column;
-  z-index: 1200;
-  opacity: 1;
-  transition: opacity .12s;
-}
-.chat-overlay.hidden { display: none; }
-
-.chat-messages { flex:1; padding:18px; overflow:auto; display:flex; flex-direction:column; gap:10px; }
-
-.chat-input { display:flex; gap:8px; padding:14px; border-top:1px solid rgba(255,255,255,0.02); }
-.chat-input input {
-  flex:1;
-  padding:12px;
-  border-radius:10px;
-  background: rgba(255,255,255,0.02);
-  color:#fff;
-  border:1px solid rgba(255,255,255,0.03);
-}
-
-.chat-message { display:flex; gap:10px; align-items:flex-start; }
-.chat-message .bubble {
-  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
-  padding:10px;
-  border-radius:10px;
-  max-width: 72%;
-}
-.chat-message.me .bubble {
-  background: linear-gradient(180deg, rgba(76,140,255,0.14), rgba(76,140,255,0.08));
-  align-self: flex-end;
-}
-
-.btn { padding:8px 10px; border-radius:8px; border:none; background:var(--accent); color:#05102a; cursor:pointer; }
-.btn.secondary { background:transparent; border:1px solid rgba(255,255,255,0.04); color:var(--muted); }
-.small { font-size:13px; color:var(--muted); }
-
+body{margin:0;font-family:sans-serif;background:#0f1114;color:#e8eefc;}
+.navbar{display:flex;justify-content:space-between;padding:12px;background:#111;}
+.tabs{display:flex;gap:8px;margin:12px;}
+.tab{padding:8px;background:#222;cursor:pointer;}
+.tab.active{background:#6b8cff;color:#fff;}
+.panel{display:none;padding:12px;background:#111;}
+.panel.active{display:block;}
+.list-item{padding:6px;background:#222;margin:2px;cursor:pointer;}
+.chat-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);display:none;flex-direction:column;}
+.chat-messages{flex:1;overflow:auto;padding:12px;}
+.chat-input{display:flex;gap:6px;padding:6px;}
 </style>
 </head>
 <body>
 <div class="navbar">
-  <div class="brand">Epick Chat</div>
-  <div style="display:flex;gap:8px">
-    <button id="accountBtn" class="btn secondary">Account</button>
-    <button id="logoutBtn" class="btn secondary">Logout</button>
-  </div>
+<div>Epick Chat</div>
+<div>
+<button id="logoutBtn">Logout</button>
+</div>
 </div>
 
 <div class="tabs">
-  <div class="tab active" data-tab="friends">Friends</div>
-  <div class="tab" data-tab="rooms">Rooms</div>
-  <div class="tab" data-tab="dms">DMs</div>
+<div class="tab active" data-tab="friends">Friends</div>
+<div class="tab" data-tab="rooms">Rooms</div>
+<div class="tab" data-tab="dms">DMs</div>
 </div>
 
-<main>
-  <section id="friends" class="panel active">
-    <div style="display:flex;gap:8px">
-      <input id="searchUser" placeholder="Search username">
-      <button id="searchBtn" class="btn secondary">Search</button>
-    </div>
-    <h4>Recently Registered</h4>
-    <div id="recentUsers" class="list"></div>
-    <h4>Requests</h4>
-    <div id="friendRequests" class="list"></div>
-    <h4>Your Friends</h4>
-    <div id="friendsList" class="list"></div>
-  </section>
+<section id="friends" class="panel active">
+<h4>Friends</h4>
+<div id="friendsList" class="list"></div>
+</section>
+<section id="rooms" class="panel">
+<h4>Rooms</h4>
+<div id="roomsList" class="list"></div>
+</section>
+<section id="dms" class="panel">
+<h4>DMs</h4>
+<div id="dmList" class="list"></div>
+</section>
 
-  <section id="rooms" class="panel">
-    <div style="display:flex;gap:8px">
-      <input id="roomName" placeholder="Room name">
-      <button id="createRoomBtn" class="btn">Create Room</button>
-    </div>
-    <h4>Available Rooms</h4>
-    <div id="roomsList" class="list"></div>
-  </section>
-
-  <section id="dms" class="panel">
-    <h4>Direct Messages</h4>
-    <div id="dmList" class="list"></div>
-  </section>
-</main>
-
-<div id="chatOverlay" class="chat-overlay hidden" aria-hidden="true">
-  <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;border-bottom:1px solid rgba(255,255,255,0.02)">
-    <div id="chatTitle">Chat</div>
-    <div style="display:flex;gap:8px;align-items:center">
-      <button id="closeChat" class="btn secondary">Close</button>
-    </div>
-  </div>
-  <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
-  <div class="chat-input">
-    <input id="chatInput" maxlength="300" placeholder="Type a message (Enter to send)">
-    <button id="sendBtn" class="btn">Send</button>
-  </div>
+<div id="chatOverlay" class="chat-overlay">
+<div id="chatTitle"></div>
+<div id="chatMessages" class="chat-messages"></div>
+<div class="chat-input">
+<input id="chatInput" placeholder="Message">
+<button id="sendBtn">Send</button>
+</div>
 </div>
 
 <script>
 (async function(){
-  const socket = io();
-  let me = null, isAdmin = false, current = null;
-  const tabs = document.querySelectorAll('.tab');
-  const panels = document.querySelectorAll('.panel');
-  const recentUsersDiv = document.getElementById('recentUsers');
-  const friendRequestsDiv = document.getElementById('friendRequests');
-  const friendsListDiv = document.getElementById('friendsList');
-  const roomsListDiv = document.getElementById('roomsList');
-  const dmListDiv = document.getElementById('dmList');
-  const chatOverlay = document.getElementById('chatOverlay');
-  const chatTitle = document.getElementById('chatTitle');
-  const chatMessages = document.getElementById('chatMessages');
-  const chatInput = document.getElementById('chatInput');
-  const sendBtn = document.getElementById('sendBtn');
-  const closeChatBtn = document.getElementById('closeChat');
+const socket = io();
+let me=null,current=null;
 
-  // Tabs
-  tabs.forEach(tab => tab.addEventListener('click', () => {
-    tabs.forEach(t => t.classList.remove('active'));
-    panels.forEach(p => p.classList.remove('active'));
-    tab.classList.add('active');
-    document.getElementById(tab.dataset.tab).classList.add('active');
-  }));
+const tabs = document.querySelectorAll('.tab');
+const panels = document.querySelectorAll('.panel');
+tabs.forEach(tab=>tab.addEventListener('click',()=>{
+  tabs.forEach(t=>t.classList.remove('active'));
+  panels.forEach(p=>p.classList.remove('active'));
+  tab.classList.add('active');
+  document.getElementById(tab.dataset.tab).classList.add('active');
+}));
 
-  document.getElementById('accountBtn').onclick = () => location.href = '/account.html';
-  document.getElementById('logoutBtn').onclick = async () => { await fetch('/logout',{method:'POST'}); location.href = '/login.html'; };
+document.getElementById('logoutBtn').onclick = async ()=>{ await fetch('/logout',{method:'POST'}); location.reload(); }
 
-  async function api(path, opts={}) {
-    try { const r = await fetch(path, opts); return await r.json(); } 
-    catch(e){ console.error('API error', path,e); return null; }
-  }
+const friendsListDiv = document.getElementById('friendsList');
+const roomsListDiv = document.getElementById('roomsList');
+const dmListDiv = document.getElementById('dmList');
+const chatOverlay = document.getElementById('chatOverlay');
+const chatMessages = document.getElementById('chatMessages');
+const chatInput = document.getElementById('chatInput');
+const sendBtn = document.getElementById('sendBtn');
+const chatTitle = document.getElementById('chatTitle');
 
-  async function init(){
-    const meRes = await api('/me');
-    if(!meRes || !meRes.loggedIn) return location.href = '/login.html';
-    me = meRes.username; isAdmin = !!meRes.admin;
-    socket.emit('registerUser', me);
-    await Promise.all([loadFriendsAndRecent(), loadRooms(), loadDMList()]);
-  }
+async function api(path,opt={}){const r=await fetch(path,opt);return r.json();}
 
-  const unreadMap = {}; // store unread messages count
-
-  async function loadFriendsAndRecent(){
-    const data = await api('/friends');
-    if(!data) return;
-    friendRequestsDiv.innerHTML = '';
-    data.requests.forEach(r => {
-      const el = document.createElement('div'); el.className='list-item';
-      el.innerHTML = `<div>${r}</div><div><button class="btn secondary">Accept</button></div>`;
-      el.querySelector('button').onclick = async e => {
-        e.stopPropagation();
-        await fetch('/accept-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ from:r })});
-        socket.emit('fetchFriends'); await loadFriendsAndRecent();
-      };
-      friendRequestsDiv.appendChild(el);
-    });
-
-    // friends
-    friendsListDiv.innerHTML=''; 
-    data.friends.forEach(f=>{
-      const el = document.createElement('div'); el.className='list-item';
-      el.innerHTML=`<div style="display:flex;align-items:center;gap:8px"><img src="${f.avatar||'/avatars/default.png'}" class="pfp"><div>${f.username}</div></div><div class="unread-dot"></div>`;
-      el.onclick=()=>openDM(f.username);
-      friendsListDiv.appendChild(el);
-      updateUnreadDot(f.username);
-    });
-
-    // recent
-    recentUsersDiv.innerHTML='';
-    data.recent.forEach(u=>{
-      const el = document.createElement('div'); el.className='list-item';
-      el.innerHTML=`<div style="display:flex;align-items:center;gap:8px"><img src="${u.avatar||'/avatars/default.png'}" class="pfp"><div>${u.username}</div></div><div><button class="btn secondary">Add</button></div>`;
-      el.querySelector('button').onclick=async e=>{
-        e.stopPropagation();
-        const j=await (await fetch('/friend-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ to:u.username })})).json();
-        alert(j.success?'Request sent':j.message||'Error');
-        await loadFriendsAndRecent();
-      };
-      recentUsersDiv.appendChild(el);
-    });
-  }
-
-  function updateUnreadDot(user){
-    const count = unreadMap[user] || 0;
-    const el = Array.from(friendsListDiv.children).find(d=>d.innerText.includes(user));
-    if(el){
-      const dot = el.querySelector('.unread-dot');
-      dot.style.display = count>0 ? 'block':'none';
-    }
-  }
-
-// Track unread messages per user
-const unreadMap = {}; // { username: count }
-
-// When opening a DM, reset unread count
-async function openDM(username) {
-    current = { type: 'dm', id: username };
-    chatTitle.textContent = `@ ${username}`;
-    chatMessages.innerHTML = '';
-    unreadMap[username] = 0;
-    updateUnreadDot(username);
-
-    const r = await api(`/dm/${username}`);
-    if (r && r.success) (r.messages || []).forEach(m => appendMessage(m));
-
-    chatOverlay.classList.remove('hidden');
-    chatOverlay.setAttribute('aria-hidden','false');
+async function init(){
+  const meRes = await api('/me');
+  if(!meRes.loggedIn) return alert('Not logged in');
+  me=meRes.username;
+  loadFriends(); loadRooms(); loadDMs();
+  socket.emit('registerUser', me);
 }
 
-// Listen for incoming DM messages
-socket.on('dmMessage', m => {
-    // Append message only if viewing that DM
-    if (current?.type === 'dm' && (current.id === m.sender || current.id === m.to)) {
-        appendMessage(m);
-    } else {
-        // Increment unread count if not viewing
-        const other = m.sender === me ? m.to : m.sender;
-        unreadMap[other] = (unreadMap[other] || 0) + 1;
-        updateUnreadDot(other);
-    }
+async function loadFriends(){
+  const data = await api('/friends');
+  friendsListDiv.innerHTML='';
+  data.friends.forEach(f=>{
+    const el=document.createElement('div');
+    el.className='list-item'; el.innerText=f.username;
+    el.onclick=()=>openDM(f.username);
+    friendsListDiv.appendChild(el);
+  });
+}
+async function loadRooms(){
+  const data = await api('/rooms');
+  roomsListDiv.innerHTML='';
+  Object.entries(data).forEach(([id,r])=>{
+    const el=document.createElement('div');
+    el.className='list-item'; el.innerText=r.name;
+    roomsListDiv.appendChild(el);
+  });
+}
+async function loadDMs(){
+  const data = await api('/friends');
+  dmListDiv.innerHTML='';
+  data.friends.forEach(f=>{
+    const el=document.createElement('div');
+    el.className='list-item'; el.innerText=f.username;
+    el.onclick=()=>openDM(f.username);
+    dmListDiv.appendChild(el);
+  });
+}
+
+function appendMessage(msg){
+  const el=document.createElement('div');
+  el.innerText = msg.sender + ': '+msg.message;
+  chatMessages.appendChild(el);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function openDM(username){
+  current={type:'dm',id:username};
+  chatTitle.innerText='@'+username;
+  chatMessages.innerHTML='';
+  chatOverlay.style.display='flex';
+  fetch(`/dm/${username}`).then(r=>r.json()).then(d=>{
+    if(d.success) d.messages.forEach(m=>appendMessage(m));
+  });
+}
+
+sendBtn.onclick = ()=>{
+  if(!current) return;
+  const msg = chatInput.value.trim();
+  if(!msg) return;
+  socket.emit(current.type+'Message',{to:current.id,message:msg});
+  chatInput.value='';
+}
+
+socket.on('dmMessage', m=>{
+  if(current?.type==='dm' && (current.id===m.sender || current.id===m.to))
+    appendMessage(m);
 });
 
-// Update unread dot element
-function updateUnreadDot(user) {
-    const count = unreadMap[user] || 0;
-    const el = Array.from(friendsListDiv.children).find(d => d.innerText.includes(user));
-    if (el) {
-        let dot = el.querySelector('.unread-dot');
-        if (!dot) {
-            dot = document.createElement('span');
-            dot.className = 'unread-dot';
-            dot.style.cssText = `
-                display:block;
-                width:10px;
-                height:10px;
-                border-radius:50%;
-                background:#6b8cff;
-                margin-left:8px;
-            `;
-            el.appendChild(dot);
-        }
-        dot.style.display = count > 0 ? 'block' : 'none';
-    }
-}
-
-
-  await init();
+await init();
 })();
 </script>
 </body>
