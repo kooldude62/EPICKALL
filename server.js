@@ -196,8 +196,6 @@ app.get("/dm/:friend", requireAuth, (req,res) => {
 });
 
 // --- Message editing/deleting endpoints (server-side)
-// If you have client edit/delete calls, ensure endpoints exist.
-// Simple implementations:
 app.post("/edit-message", requireAuth, (req,res) => {
   const { id, roomId, newMsg, dmWith } = req.body;
   const user = req.session.user;
@@ -266,6 +264,7 @@ io.on("connection", (socket) => {
     if (!roomId || !store.rooms[roomId]) return;
     socket.join(roomId);
     const messages = store.rooms[roomId].messages || [];
+    // send history to the joining socket
     socket.emit("chatHistory", messages);
   });
 
@@ -287,7 +286,7 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("roomMessage", msgObj);
   });
 
-  // --- FIXED DM: include 'to' in the emitted/stored message
+  // --- DM: include 'to' in the emitted/stored message
   socket.on("dmMessage", ({ to, message }) => {
     const from = socket.username;
     if (!from || !to || !store.users[to] || !message) return;
@@ -295,7 +294,7 @@ io.on("connection", (socket) => {
     const msg = {
       id: genId(),
       sender: from,
-      to, // <-- include recipient
+      to, // recipient
       avatar: store.users[from]?.avatar || "/avatars/default.png",
       message: text,
       time: Date.now()
@@ -304,7 +303,7 @@ io.on("connection", (socket) => {
     store.dms[key] = store.dms[key] || [];
     store.dms[key].push(msg);
     saveData();
-    // emit to recipient and sender (both are in personal rooms)
+    // emit to recipient and sender
     io.to(to).emit("dmMessage", msg);
     io.to(from).emit("dmMessage", msg);
     // send notification to recipient
