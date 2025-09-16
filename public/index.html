@@ -18,7 +18,7 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
 .list{display:flex;flex-direction:column;gap:6px;max-height:56vh;overflow:auto;padding-right:6px} 
 .list-item{display:flex;align-items:center;justify-content:space-between;padding:8px;border-radius:8px;background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));cursor:pointer} 
 .pfp{width:36px;height:36px;border-radius:50%;object-fit:cover;border:1px solid rgba(255,255,255,0.04)} 
-.chat-overlay{position:fixed;inset:0;background:linear-gradient(180deg, rgba(1,4,8,0.85), rgba(1,4,8,0.95));display:flex;flex-direction:column;z-index:1200;opacity:1;transition:opacity .12s} 
+.chat-overlay{position:fixed;inset:0;background:linear-gradient(180deg, rgba(1,4,8,0.85), rgba(1,4,8,0.95));display:flex;flex-direction:column;z-index:1200} 
 .chat-overlay.hidden{display:none} 
 .chat-messages{flex:1;padding:18px;overflow:auto;display:flex;flex-direction:column;gap:10px} 
 .chat-input{display:flex;gap:8px;padding:14px;border-top:1px solid rgba(255,255,255,0.02)} 
@@ -26,6 +26,7 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
 .chat-message{display:flex;gap:10px;align-items:flex-start} 
 .chat-message .bubble{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:10px;border-radius:10px;max-width:72%} 
 .chat-message.me .bubble{background:linear-gradient(180deg, rgba(107,140,255,0.14), rgba(107,140,255,0.08));align-self:flex-end} 
+.bubble .actions{margin-top:4px;font-size:12px;display:flex;gap:6px;color:var(--muted);cursor:pointer} 
 .btn{padding:8px 10px;border-radius:8px;border:none;background:var(--accent);color:#05102a;cursor:pointer} 
 .btn.secondary{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted)} 
 .small{font-size:13px;color:var(--muted)} 
@@ -87,7 +88,7 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
 <script>
 (async function(){
 const socket = io();
-let me = null, isAdmin = false, current = null, unreadDMs = new Set();
+let me = null, myId = null, isAdmin = false, current = null, unreadDMs = new Set();
 const dmListDiv = document.getElementById('dmList');
 const chatOverlay = document.getElementById('chatOverlay');
 const chatTitle = document.getElementById('chatTitle');
@@ -104,7 +105,7 @@ async function api(path, opts = {}) { try { const r = await fetch(path, opts); r
 async function init(){
   const meRes = await api('/me');
   if(!meRes || !meRes.loggedIn) return location.href = '/login.html';
-  me = meRes.username; isAdmin = !!meRes.admin;
+  me = meRes.username; myId = meRes.id; isAdmin = !!meRes.admin;
   socket.emit('registerUser', me);
   await loadDMList();
 }
@@ -112,11 +113,7 @@ async function init(){
 async function loadDMList(){
   const data = await api('/friends'); if(!data) return;
   dmListDiv.innerHTML = '';
-  let friends = (data.friends||[]).map(f=>({
-    ...f,
-    unread: unreadDMs.has(f.username)
-  }));
-  // sort: unread first
+  let friends = (data.friends||[]).map(f=>({...f, unread: unreadDMs.has(f.username)}));
   friends.sort((a,b)=> (b.unread?1:0) - (a.unread?1:0));
   friends.forEach(f=>{
     const el = document.createElement('div');
@@ -150,7 +147,26 @@ function appendMessage(m){
   el.dataset.msgid = m.id;
   const av = document.createElement('img'); av.src = m.avatar||'/avatars/default.png'; av.className='pfp';
   const bubble = document.createElement('div'); bubble.className='bubble';
-  bubble.innerHTML = `<div style="font-size:12px;color:var(--muted)">${m.sender} • ${new Date(m.time||Date.now()).toLocaleString()}</div><div style="margin-top:6px">${m.message}</div>`;
+  bubble.innerHTML = `
+    <div style="font-size:12px;color:var(--muted)">${m.sender} • ${new Date(m.time||Date.now()).toLocaleString()}</div>
+    <div style="margin-top:6px">${m.message}</div>
+  `;
+  if(m.sender===me || isAdmin){
+    const actions = document.createElement('div');
+    actions.className='actions';
+    actions.innerHTML = `<span data-act="reply">Reply</span> <span data-act="edit">Edit</span> <span data-act="delete">Delete</span>`;
+    actions.onclick = e=>{
+      if(e.target.dataset.act==='reply') chatInput.value = `@${m.sender} ${chatInput.value}`;
+      if(e.target.dataset.act==='edit') {
+        const newMsg = prompt('Edit your message:', m.message);
+        if(newMsg) socket.emit('editMessage',{id:m.id,newMsg});
+      }
+      if(e.target.dataset.act==='delete') {
+        if(confirm('Delete this message?')) socket.emit('deleteMessage',{id:m.id});
+      }
+    };
+    bubble.appendChild(actions);
+  }
   el.appendChild(av); el.appendChild(bubble);
   chatMessages.appendChild(el);
   chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -160,7 +176,11 @@ function sendMessage(){
   const txt = chatInput.value.trim();
   if(!txt) return;
   if(!current) return;
-  if(current.type==='dm') socket.emit('dmMessage',{to:current.id,message:txt});
+  if(current.type==='dm') {
+    const msg = {id:Date.now().toString(),sender:me,avatar:null,message:txt,time:Date.now(),to:current.id};
+    appendMessage(msg); // show instantly for sender
+    socket.emit('dmMessage',{to:current.id,message:txt});
+  }
   chatInput.value='';
 }
 
@@ -171,14 +191,31 @@ socket.on('dmMessage', m => {
   if(current?.type==='dm' && (current.id===m.sender || current.id===m.to)) {
     appendMessage(m);
   } else {
-    // mark unread
     const other = m.sender===me ? m.to : m.sender;
     unreadDMs.add(other);
     loadDMList();
   }
 });
+socket.on('editMessage', m=>{
+  const el = chatMessages.querySelector(`[data-msgid="${m.id}"] .bubble div:nth-child(2)`);
+  if(el) el.textContent = m.newMsg;
+});
+socket.on('deleteMessage', m=>{
+  const el = chatMessages.querySelector(`[data-msgid="${m.id}"]`);
+  if(el) el.remove();
+});
 
 closeChatBtn.onclick = ()=>{ chatOverlay.classList.add('hidden'); chatOverlay.setAttribute('aria-hidden','true'); current=null; };
+
+// tab logic
+document.querySelectorAll('.tab').forEach(tab=>{
+  tab.onclick=()=>{
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById(tab.dataset.tab).classList.add('active');
+  };
+});
 
 await init();
 })();
