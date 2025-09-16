@@ -5,8 +5,15 @@
 <title>Epick Chat</title>
 <script src="/socket.io/socket.io.js"></script>
 <style>
-  :root{--bg:#0f1114;--panel:rgba(255,255,255,0.04);--muted:rgba(255,255,255,0.6);--accent:#6b8cff;--glass:rgba(255,255,255,0.03);--glass-2:rgba(255,255,255,0.02)}
-  *{box-sizing:border-box}
+  :root{
+    --bg:#0f1114;
+    --panel:rgba(255,255,255,0.04);
+    --muted:rgba(255,255,255,0.6);
+    --accent:#6b8cff;
+    --glass:rgba(255,255,255,0.03);
+    --glass-2:rgba(255,255,255,0.02)
+  }
+  *{box-sizing:border-box;}
   body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#071021,#0f1114);color:#e8eefc;min-height:100vh}
   .navbar{display:flex;justify-content:space-between;padding:12px 20px;background:var(--glass-2);border-bottom:1px solid rgba(255,255,255,0.02)}
   .tabs{display:flex;gap:8px;margin:16px;padding:0 12px}
@@ -29,79 +36,78 @@
   .btn{padding:8px 10px;border-radius:8px;border:none;background:var(--accent);color:#05102a;cursor:pointer}
   .btn.secondary{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted)}
   .small{font-size:13px;color:var(--muted)}
-  .quoted{opacity:0.9;font-size:13px;padding:6px;border-radius:6px;background:rgba(255,255,255,0.02);margin-bottom:6px}
 </style>
 </head>
 <body>
 
-  <div class="navbar">
-    <div class="brand">Epick Chat</div>
+<div class="navbar">
+  <div class="brand">Epick Chat</div>
+  <div style="display:flex;gap:8px">
+    <button id="accountBtn" class="btn secondary">Account</button>
+    <button id="logoutBtn" class="btn secondary">Logout</button>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="friends">Friends</div>
+  <div class="tab" data-tab="rooms">Rooms</div>
+  <div class="tab" data-tab="dms">DMs</div>
+</div>
+
+<main>
+  <section id="friends" class="panel active">
     <div style="display:flex;gap:8px">
-      <button id="accountBtn" class="btn secondary">Account</button>
-      <button id="logoutBtn" class="btn secondary">Logout</button>
+      <input id="searchUser" placeholder="Search username">
+      <button id="searchBtn" class="btn secondary">Search</button>
+    </div>
+
+    <h4>Recently Registered</h4>
+    <div id="recentUsers" class="list"></div>
+
+    <h4>Requests</h4>
+    <div id="friendRequests" class="list"></div>
+
+    <h4>Your Friends</h4>
+    <div id="friendsList" class="list"></div>
+  </section>
+
+  <section id="rooms" class="panel">
+    <div style="display:flex;gap:8px">
+      <input id="roomName" placeholder="Room name">
+      <button id="createRoomBtn" class="btn">Create Room</button>
+    </div>
+
+    <h4>Available Rooms</h4>
+    <div id="roomsList" class="list"></div>
+  </section>
+
+  <section id="dms" class="panel">
+    <h4>Direct Messages</h4>
+    <div id="dmList" class="list"></div>
+  </section>
+</main>
+
+<div id="chatOverlay" class="chat-overlay hidden" aria-hidden="true">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;border-bottom:1px solid rgba(255,255,255,0.02)">
+    <div id="chatTitle">Chat</div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button id="closeChat" class="btn secondary">Close</button>
     </div>
   </div>
 
-  <div class="tabs">
-    <div class="tab active" data-tab="friends">Friends</div>
-    <div class="tab" data-tab="rooms">Rooms</div>
-    <div class="tab" data-tab="dms">DMs</div>
+  <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
+
+  <div class="chat-input">
+    <input id="chatInput" maxlength="300" placeholder="Type a message (Enter to send)">
+    <button id="sendBtn" class="btn">Send</button>
   </div>
-
-  <main>
-    <section id="friends" class="panel active">
-      <div style="display:flex;gap:8px">
-        <input id="searchUser" placeholder="Search username">
-        <button id="searchBtn" class="btn secondary">Search</button>
-      </div>
-
-      <h4>Recently Registered</h4>
-      <div id="recentUsers" class="list"></div>
-
-      <h4>Requests</h4>
-      <div id="friendRequests" class="list"></div>
-
-      <h4>Your Friends</h4>
-      <div id="friendsList" class="list"></div>
-    </section>
-
-    <section id="rooms" class="panel">
-      <div style="display:flex;gap:8px">
-        <input id="roomName" placeholder="Room name">
-        <button id="createRoomBtn" class="btn">Create Room</button>
-      </div>
-
-      <h4>Available Rooms</h4>
-      <div id="roomsList" class="list"></div>
-    </section>
-
-    <section id="dms" class="panel">
-      <h4>Direct Messages</h4>
-      <div id="dmList" class="list"></div>
-    </section>
-  </main>
-
-  <div id="chatOverlay" class="chat-overlay hidden" aria-hidden="true">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;border-bottom:1px solid rgba(255,255,255,0.02)">
-      <div id="chatTitle">Chat</div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <div id="replyPreview" style="display:none" class="small"></div>
-        <button id="closeChat" class="btn secondary">Close</button>
-      </div>
-    </div>
-
-    <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
-
-    <div class="chat-input">
-      <input id="chatInput" maxlength="300" placeholder="Type a message (Enter to send)">
-      <button id="sendBtn" class="btn">Send</button>
-    </div>
-  </div>
+</div>
 
 <script>
 (async function(){
   const socket = io();
   let me = null, isAdmin = false, current = null;
+
   const tabs = document.querySelectorAll('.tab');
   const panels = document.querySelectorAll('.panel');
   const recentUsersDiv = document.getElementById('recentUsers');
@@ -115,9 +121,7 @@
   const chatInput = document.getElementById('chatInput');
   const sendBtn = document.getElementById('sendBtn');
   const closeChatBtn = document.getElementById('closeChat');
-  const replyPreview = document.getElementById('replyPreview');
 
-  // tab switching
   tabs.forEach(tab=>tab.addEventListener('click', ()=>{
     tabs.forEach(t=>t.classList.remove('active'));
     panels.forEach(p=>p.classList.remove('active'));
@@ -138,21 +142,12 @@
     }
   }
 
-  // start immediately (no loader)
   async function init(){
     const meRes = await api('/me');
     if(!meRes || !meRes.loggedIn) return location.href = '/login.html';
     me = meRes.username; isAdmin = !!meRes.admin;
     socket.emit('registerUser', me);
     await Promise.all([loadFriendsAndRecent(), loadRooms(), loadDMList()]);
-    // handle invite param
-    const url = new URL(location.href);
-    const invite = url.searchParams.get('invite');
-    if(invite){
-      const ri = await api(`/room-info/${invite}`);
-      if(ri && ri.success) openRoom(invite, ri.name);
-      else alert('Invalid invite link');
-    }
   }
 
   async function loadFriendsAndRecent(){
@@ -163,37 +158,25 @@
     (data.requests||[]).forEach(r=>{
       const el = document.createElement('div'); el.className='list-item';
       el.innerHTML = `<div>${r}</div><div><button class="btn secondary">Accept</button></div>`;
-      el.querySelector('button').onclick = async (e)=> {
-        e.stopPropagation();
-        await fetch('/accept-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ from: r })});
-        socket.emit('fetchFriends');
-        await loadFriendsAndRecent();
-      };
+      el.querySelector('button').onclick = async e=>{ e.stopPropagation(); await fetch('/accept-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ from:r })}); socket.emit('fetchFriends'); await loadFriendsAndRecent(); };
       friendRequestsDiv.appendChild(el);
     });
 
-    // friends (dedupe)
-    friendsListDiv.innerHTML = ''; const seen = new Set();
+    // friends
+    friendsListDiv.innerHTML = '';
     (data.friends||[]).forEach(f=>{
-      if(seen.has(f.username)) return; seen.add(f.username);
       const el = document.createElement('div'); el.className='list-item';
       el.innerHTML = `<div style="display:flex;align-items:center;gap:8px"><img src="${f.avatar||'/avatars/default.png'}" class="pfp"><div>${f.username}</div></div>`;
       el.onclick = ()=> openDM(f.username);
       friendsListDiv.appendChild(el);
     });
 
-    // recent users
+    // recent
     recentUsersDiv.innerHTML = '';
     (data.recent||[]).forEach(u=>{
       const el = document.createElement('div'); el.className='list-item';
       el.innerHTML = `<div style="display:flex;align-items:center;gap:8px"><img src="${u.avatar||'/avatars/default.png'}" class="pfp"><div>${u.username}</div></div><div><button class="btn secondary">Add</button></div>`;
-      el.querySelector('button').onclick = async (e)=> {
-        e.stopPropagation();
-        const resp = await fetch('/friend-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ to: u.username })});
-        const j = await resp.json();
-        alert(j.success ? 'Request sent' : j.message || 'Error');
-        await loadFriendsAndRecent();
-      };
+      el.querySelector('button').onclick = async e=>{ e.stopPropagation(); const resp = await fetch('/friend-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ to: u.username })}); const j=await resp.json(); alert(j.success?'Request sent':j.message||'Error'); await loadFriendsAndRecent(); };
       recentUsersDiv.appendChild(el);
     });
   }
@@ -205,7 +188,7 @@
     Object.entries(data).forEach(([id, r])=>{
       const el = document.createElement('div'); el.className='list-item';
       el.innerHTML = `<div>${r.name}</div><div><button class="btn secondary">Join</button></div>`;
-      el.querySelector('button').onclick = ()=> openRoom(id, r.name);
+      el.querySelector('button').onclick = ()=> openRoom(id,r.name);
       roomsListDiv.appendChild(el);
     });
   }
@@ -231,96 +214,78 @@
     else alert(j.message || 'Create failed');
   };
 
-  function openRoom(id, name){
-    current = { type:'room', id };
+  function openRoom(id,name){
+    current={type:'room',id};
     chatTitle.textContent = `# ${name}`;
-    chatMessages.innerHTML = '';
+    chatMessages.innerHTML='';
     chatOverlay.classList.remove('hidden'); chatOverlay.setAttribute('aria-hidden','false');
-    socket.emit('joinRoom', { roomId: id });
+    socket.emit('joinRoom',{roomId:id});
   }
 
   async function openDM(username){
-    current = { type:'dm', id: username };
+    current={type:'dm',id:username};
     chatTitle.textContent = `@ ${username}`;
-    chatMessages.innerHTML = '';
-    chatOverlay.classList.remove('hidden'); chatOverlay.setAttribute('aria-hidden','false');
+    chatMessages.innerHTML='';
     const r = await api(`/dm/${username}`);
-    if(r && r.success) (r.messages||[]).forEach(m => appendMessage(m));
+    if(r && r.success) (r.messages||[]).forEach(m=>appendMessage(m));
   }
 
   function appendMessage(m){
     if(!m || !m.id) return;
     if(document.querySelector(`[data-msgid="${m.id}"]`)) return;
-    const el = document.createElement('div'); el.className = 'chat-message' + (m.sender===me ? ' me' : '');
+    const el = document.createElement('div'); el.className='chat-message'+(m.sender===me?' me':'');
     el.dataset.msgid = m.id;
-    const av = document.createElement('img'); av.src = m.avatar || '/avatars/default.png'; av.className='pfp';
+    const av = document.createElement('img'); av.src = m.avatar||'/avatars/default.png'; av.className='pfp';
     const bubble = document.createElement('div'); bubble.className='bubble';
     bubble.innerHTML = `<div style="font-size:12px;color:var(--muted)">${m.sender} • ${new Date(m.time||Date.now()).toLocaleString()}</div><div style="margin-top:6px">${escapeHtml(m.message||'')}</div>`;
-    // controls
-    if(m.sender===me || isAdmin){
-      const ctr = document.createElement('div'); ctr.style.marginTop='6px';
-      const del = document.createElement('button'); del.className='btn secondary'; del.style.marginLeft='6px'; del.innerText='Delete';
-      del.onclick = async (e)=>{ e.stopPropagation(); if(!confirm('Delete?')) return; await fetch('/delete-message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ id:m.id, roomId: m.roomId || undefined, dmWith: m.roomId ? undefined : current?.id })}); el.remove(); };
-      const ed = document.createElement('button'); ed.className='btn secondary'; ed.style.marginLeft='6px'; ed.innerText='Edit';
-      ed.onclick = async (e)=>{ e.stopPropagation(); const newT = prompt('Edit message', m.message); if(newT==null) return; await fetch('/edit-message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ id:m.id, roomId: m.roomId || undefined, newMsg: newT, dmWith: m.roomId ? undefined : current?.id })}); bubble.querySelector('div:nth-child(2)').innerHTML = escapeHtml(newT); };
-      ctr.appendChild(ed); ctr.appendChild(del);
-      bubble.appendChild(ctr);
-    }
     el.appendChild(av); el.appendChild(bubble);
     chatMessages.appendChild(el);
     chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 
-  sendBtn.onclick = sendMessage;
-  chatInput.addEventListener('keydown', (e)=> { if(e.key==='Enter') sendMessage(); });
-
   function sendMessage(){
     const txt = chatInput.value.trim();
     if(!txt) return;
-    if(txt.length > 300) return alert('Message length max 300');
+    if(txt.length>300) return alert('Message length max 300');
     if(!current) return alert('Open a room or DM first');
-    if(current.type === 'room') socket.emit('roomMessage', { roomId: current.id, message: txt });
-    else socket.emit('dmMessage', { to: current.id, message: txt });
-    chatInput.value = '';
+
+    // optimistic append
+    const tempMsg = { sender: me, receiver: current.id, message: txt, id: 'temp-'+Date.now(), time: Date.now() };
+    appendMessage(tempMsg);
+
+    if(current.type==='room') socket.emit('roomMessage',{roomId:current.id,message:txt});
+    else socket.emit('dmMessage',{to:current.id,message:txt});
+
+    chatInput.value='';
   }
 
-  // socket handlers
-  socket.on('chatHistory', msgs => { chatMessages.innerHTML = ''; (msgs||[]).forEach(m => appendMessage(m)); });
-  socket.on('roomMessage', m => { if(current?.type === 'room' && current.id === m.roomId) appendMessage(m); });
-  socket.on('dmMessage', m => { if(current?.type === 'dm' && current.id === m.sender) appendMessage(m); else console.log('New DM', m); });
-  socket.on('dmNotification', ({from}) => console.log('New DM from', from));
-  socket.on('friendRequest', (from) => { loadFriendsAndRecent(); alert('Friend request from ' + from); });
-  socket.on('friendsUpdate', () => { loadFriendsAndRecent(); loadDMList(); });
-  socket.on('roomsUpdated', () => loadRooms());
-  socket.on('updateMessage', msg => {
-    const el = document.querySelector(`[data-msgid="${msg.id}"]`);
-    if(el){
-      const bubble = el.querySelector('.bubble');
-      if(bubble) bubble.querySelector('div:nth-child(2)').innerHTML = escapeHtml(msg.message||'');
-    }
-  });
-  socket.on('deleteMessage', id => {
-    const el = document.querySelector(`[data-msgid="${id}"]`);
-    if(el) el.remove();
-  });
-  socket.on('connect', ()=> socket.emit('fetchFriends'));
+  sendBtn.onclick = sendMessage;
+  chatInput.addEventListener('keydown', e=>{ if(e.key==='Enter') sendMessage(); });
 
-  closeChatBtn.onclick = ()=> { chatOverlay.classList.add('hidden'); chatOverlay.setAttribute('aria-hidden','true'); current = null; };
+  socket.on('roomMessage', m => { if(current?.type==='room' && current.id===m.roomId) appendMessage(m); });
+  socket.on('dmMessage', m => { if(current?.type==='dm' && (current.id===m.sender || current.id===m.receiver)) appendMessage(m); });
+  socket.on('friendRequest', from=>{ loadFriendsAndRecent(); alert('Friend request from '+from); });
+  socket.on('friendsUpdate', ()=>{ loadFriendsAndRecent(); loadDMList(); });
+  socket.on('roomsUpdated', ()=>loadRooms());
+
+  closeChatBtn.onclick = ()=>{ chatOverlay.classList.add('hidden'); chatOverlay.setAttribute('aria-hidden','true'); current=null; };
 
   document.getElementById('searchBtn').onclick = async ()=>{
-    const q = document.getElementById('searchUser').value.trim();
-    if(!q) return alert('enter username');
-    recentUsersDiv.innerHTML = '';
-    const el = document.createElement('div'); el.className='list-item'; el.innerHTML = `<div>${q}</div><div><button class="btn secondary">Add</button></div>`;
-    el.querySelector('button').onclick = async ()=> { const resp = await fetch('/friend-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ to: q })}); const j = await resp.json(); alert(j.success ? 'Request sent' : j.message || 'Error'); await loadFriendsAndRecent(); };
+    const q=document.getElementById('searchUser').value.trim();
+    if(!q) return alert('Enter username');
+    recentUsersDiv.innerHTML='';
+    const el = document.createElement('div'); el.className='list-item';
+    el.innerHTML=`<div>${q}</div><div><button class="btn secondary">Add</button></div>`;
+    el.querySelector('button').onclick = async ()=>{
+      const resp = await fetch('/friend-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({to:q})});
+      const j = await resp.json(); alert(j.success?'Request sent':j.message||'Error'); await loadFriendsAndRecent();
+    };
     recentUsersDiv.appendChild(el);
   };
 
-  function escapeHtml(s){ return (s||'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function escapeHtml(s){ return (s||'').toString().replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-  // launch
   await init();
-
 })();
 </script>
 </body>
