@@ -6,53 +6,40 @@
 <script src="/socket.io/socket.io.js"></script>
 <style>
 :root{ --bg:#0f1114; --panel:rgba(255,255,255,0.04); --muted:rgba(255,255,255,0.6); --accent:#6b8cff; --glass:rgba(255,255,255,0.03); --glass-2:rgba(255,255,255,0.02) }
-*{box-sizing:border-box;} 
-body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#071021,#0f1114);color:#e8eefc;min-height:100vh} 
-.navbar{display:flex;justify-content:space-between;padding:12px 20px;background:var(--glass-2);border-bottom:1px solid rgba(255,255,255,0.02)} 
-.brand{font-weight:700;color:var(--accent)}
-.nav-actions{display:flex;gap:8px;align-items:center}
-.notifications {position:relative}
-.notif-btn {background:transparent;border:1px solid rgba(255,255,255,0.04);padding:6px 8px;border-radius:8px;color:var(--muted);cursor:pointer}
-.notif-count {position:absolute;right:-6px;top:-6px;background:var(--accent);color:#fff;font-size:12px;padding:2px 6px;border-radius:999px}
-.notif-pop {position:absolute;right:0;top:36px;background:var(--panel);border-radius:8px;padding:8px;min-width:220px;box-shadow:0 8px 30px rgba(0,0,0,0.6);display:none;z-index:2000}
-.notif-pop.visible{display:block}
-.tabs{display:flex;gap:8px;margin:16px;padding:0 12px} 
-.tab{padding:10px 12px;border-radius:10px;background:var(--glass-2);cursor:pointer;color:var(--muted)} 
-.tab.active{background:linear-gradient(90deg, rgba(107,140,255,0.12), rgba(107,140,255,0.06));color:#fff} 
-main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px} 
-.panel{background:var(--panel);border-radius:12px;padding:12px;min-height:60vh;display:none;flex-direction:column;gap:12px} 
-.panel.active{display:flex} 
-.list{display:flex;flex-direction:column;gap:6px;max-height:56vh;overflow:auto;padding-right:6px} 
-.list-item{display:flex;align-items:center;justify-content:space-between;padding:8px;border-radius:8px;background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));cursor:pointer} 
-.pfp{width:36px;height:36px;border-radius:50%;object-fit:cover;border:1px solid rgba(255,255,255,0.04)} 
-.room-pfp{width:28px;height:28px;border-radius:6px;object-fit:cover;border:1px solid rgba(255,255,255,0.04);margin-right:8px}
-.chat-overlay{position:fixed;inset:0;background:linear-gradient(180deg, rgba(1,4,8,0.85), rgba(1,4,8,0.95));display:flex;flex-direction:column;z-index:1200} 
-.chat-overlay.hidden{display:none} 
-.chat-messages{flex:1;padding:18px;overflow:auto;display:flex;flex-direction:column;gap:10px} 
-.chat-input{display:flex;gap:8px;padding:14px;border-top:1px solid rgba(255,255,255,0.02)} 
-.chat-input input{flex:1;padding:12px;border-radius:10px;background:rgba(255,255,255,0.02);color:#fff;border:1px solid rgba(255,255,255,0.03)} 
-.reply-preview{padding:8px;border-left:3px solid rgba(107,140,255,0.6);margin-bottom:8px;border-radius:6px;background:rgba(255,255,255,0.02);display:flex;justify-content:space-between;align-items:center}
-.chat-message{display:flex;gap:10px;align-items:flex-start} 
-.chat-message .bubble{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:10px;border-radius:10px;max-width:72%} 
-.chat-message.me .bubble{background:linear-gradient(180deg, rgba(107,140,255,0.14), rgba(107,140,255,0.08));align-self:flex-end} 
-.bubble .actions{margin-top:4px;font-size:12px;display:flex;gap:6px;color:var(--muted);cursor:pointer} 
-.btn{padding:8px 10px;border-radius:8px;border:none;background:var(--accent);color:#05102a;cursor:pointer} 
-.btn.secondary{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted)} 
-.small{font-size:13px;color:var(--muted)} 
+*{box-sizing:border-box;}
+body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#071021,#0f1114);color:#e8eefc;min-height:100vh}
+.navbar{display:flex;justify-content:space-between;padding:12px 20px;background:var(--glass-2);border-bottom:1px solid rgba(255,255,255,0.02)}
+.tabs{display:flex;gap:8px;margin:16px;padding:0 12px}
+.tab{padding:10px 12px;border-radius:10px;background:var(--glass-2);cursor:pointer;color:var(--muted)}
+.tab.active{background:linear-gradient(90deg, rgba(107,140,255,0.12), rgba(107,140,255,0.06));color:#fff}
+main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
+.panel{background:var(--panel);border-radius:12px;padding:12px;min-height:60vh;display:none;flex-direction:column;gap:12px}
+.panel.active{display:flex}
+.list{display:flex;flex-direction:column;gap:6px;max-height:56vh;overflow:auto;padding-right:6px}
+.list-item{display:flex;align-items:center;justify-content:space-between;padding:8px;border-radius:8px;background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));cursor:pointer}
+.pfp{width:36px;height:36px;border-radius:50%;object-fit:cover;border:1px solid rgba(255,255,255,0.04)}
+.chat-overlay{position:fixed;inset:0;background:linear-gradient(180deg, rgba(1,4,8,0.85), rgba(1,4,8,0.95));display:flex;flex-direction:column;z-index:1200}
+.chat-overlay.hidden{display:none}
+.chat-messages{flex:1;padding:18px;overflow:auto;display:flex;flex-direction:column;gap:10px}
+.chat-input{display:flex;gap:8px;padding:14px;border-top:1px solid rgba(255,255,255,0.02)}
+.chat-input input{flex:1;padding:12px;border-radius:10px;background:rgba(255,255,255,0.02);color:#fff;border:1px solid rgba(255,255,255,0.03)}
+.chat-message{display:flex;gap:10px;align-items:flex-start}
+.chat-message .bubble{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:10px;border-radius:10px;max-width:72%}
+.chat-message.me .bubble{background:linear-gradient(180deg, rgba(107,140,255,0.14), rgba(107,140,255,0.08));align-self:flex-end}
+.bubble .actions{margin-top:4px;font-size:12px;display:flex;gap:6px;color:var(--muted);cursor:pointer}
+.btn{padding:8px 10px;border-radius:8px;border:none;background:var(--accent);color:#05102a;cursor:pointer}
+.btn.secondary{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted)}
+.small{font-size:13px;color:var(--muted)}
 .unread-dot{width:10px;height:10px;border-radius:50%;background:var(--accent);margin-left:8px;flex-shrink:0}
-.temp { opacity: 0.85; filter: blur(0.2px); }
-.quoted { font-size:13px; opacity:0.9; padding:6px; border-radius:6px; background: rgba(255,255,255,0.02); margin-bottom:8px; cursor:pointer; }
+.room-pfp{width:40px;height:40px;border-radius:6px;object-fit:cover;border:1px solid rgba(255,255,255,0.04);margin-right:8px}
+.room-manage{margin-left:8px;padding:6px 8px;border-radius:8px;border:none;background:transparent;color:var(--muted);cursor:pointer}
+.room-header{display:flex;align-items:center;gap:8px}
 </style>
 </head>
 <body>
 <div class="navbar">
   <div class="brand">Epick Chat</div>
-  <div class="nav-actions">
-    <div class="notifications">
-      <button id="notifBtn" class="notif-btn">Inbox</button>
-      <div id="notifCount" class="notif-count" style="display:none">0</div>
-      <div id="notifPop" class="notif-pop"></div>
-    </div>
+  <div style="display:flex;gap:8px">
     <button id="accountBtn" class="btn secondary">Account</button>
     <button id="logoutBtn" class="btn secondary">Logout</button>
   </div>
@@ -70,23 +57,19 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
       <input id="searchUser" placeholder="Search username">
       <button id="searchBtn" class="btn secondary">Search</button>
     </div>
-
     <h4>Recently Registered</h4>
     <div id="recentUsers" class="list"></div>
-
     <h4>Requests</h4>
     <div id="friendRequests" class="list"></div>
-
     <h4>Your Friends</h4>
     <div id="friendsList" class="list"></div>
   </section>
 
   <section id="rooms" class="panel">
-    <div style="display:flex;gap:8px">
+    <div style="display:flex;gap:8px;align-items:center">
       <input id="roomName" placeholder="Room name">
       <button id="createRoomBtn" class="btn">Create Room</button>
     </div>
-
     <h4>Available Rooms</h4>
     <div id="roomsList" class="list"></div>
   </section>
@@ -97,19 +80,13 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
   </section>
 </main>
 
+<!-- chat overlay -->
 <div id="chatOverlay" class="chat-overlay hidden" aria-hidden="true">
   <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;border-bottom:1px solid rgba(255,255,255,0.02)">
-    <div style="display:flex;align-items:center;gap:8px">
-      <img id="roomPfp" src="" class="room-pfp" style="display:none">
-      <div id="chatTitle">Chat</div>
-    </div>
+    <div id="chatTitle" class="room-header">Chat</div>
     <div style="display:flex;gap:8px;align-items:center">
       <button id="closeChat" class="btn secondary">Close</button>
     </div>
-  </div>
-
-  <div id="replyPreview" class="reply-preview" style="display:none">
-    <div id="replyText"></div><div><button id="clearReply" class="btn secondary">Clear</button></div>
   </div>
 
   <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
@@ -123,411 +100,263 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
 <script>
 (async function(){
   const socket = io();
-  let me = null, isAdmin = false;
-  let current = null; // { type:'dm'|'room', id: ... }
-  const unreadDMs = new Set();
-  const notifications = [];
-  let replyTo = null; // id of message being replied to
-
-  // DOM refs
-  const notifBtn = document.getElementById('notifBtn');
-  const notifPop = document.getElementById('notifPop');
-  const notifCount = document.getElementById('notifCount');
-  const dmListDiv = document.getElementById('dmList');
+  let me = null, isAdmin = false, current = null, unreadDMs = new Set();
+  const tabs = document.querySelectorAll('.tab');
+  const panels = document.querySelectorAll('.panel');
   const recentUsersDiv = document.getElementById('recentUsers');
   const friendRequestsDiv = document.getElementById('friendRequests');
   const friendsListDiv = document.getElementById('friendsList');
   const roomsListDiv = document.getElementById('roomsList');
-
+  const dmListDiv = document.getElementById('dmList');
   const chatOverlay = document.getElementById('chatOverlay');
   const chatTitle = document.getElementById('chatTitle');
-  const roomPfp = document.getElementById('roomPfp');
   const chatMessages = document.getElementById('chatMessages');
   const chatInput = document.getElementById('chatInput');
   const sendBtn = document.getElementById('sendBtn');
   const closeChatBtn = document.getElementById('closeChat');
-  const replyPreview = document.getElementById('replyPreview');
-  const replyText = document.getElementById('replyText');
-  const clearReplyBtn = document.getElementById('clearReply');
 
-  // nav actions
+  function showToast(t){ console.log(t); } // simple placeholder
+
+  // tab switching
+  tabs.forEach(tab=>tab.addEventListener('click', ()=>{
+    tabs.forEach(t=>t.classList.remove('active'));
+    panels.forEach(p=>p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById(tab.dataset.tab).classList.add('active');
+  }));
+
   document.getElementById('accountBtn').onclick = ()=> location.href = '/account.html';
   document.getElementById('logoutBtn').onclick = async ()=> { await fetch('/logout',{method:'POST'}); location.href = '/login.html'; };
 
-  notifBtn.onclick = ()=> {
-    if(notifPop.classList.contains('visible')) { notifPop.classList.remove('visible'); return; }
-    renderNotifications();
-    notifPop.classList.add('visible');
-  };
-
-  function pushNotification(obj){
-    notifications.unshift(obj);
-    notifCount.innerText = notifications.length;
-    notifCount.style.display = notifications.length ? 'block' : 'none';
-    if(notifPop.classList.contains('visible')) renderNotifications();
-  }
-
-  function renderNotifications(){
-    notifPop.innerHTML = notifications.length ? notifications.map(n=>`<div style="padding:6px;border-bottom:1px solid rgba(255,255,255,0.02);"><div style="font-size:13px">${escapeHtml(n.text)}</div><div style="font-size:12px;color:var(--muted)">${new Date(n.time).toLocaleString()}</div></div>`).join('') : '<div style="padding:8px;color:var(--muted)">No notifications</div>';
-  }
-
-  // tab switching
-  document.querySelectorAll('.tab').forEach(tab=>{
-    tab.onclick=()=>{
-      document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-      document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-      tab.classList.add('active');
-      document.getElementById(tab.dataset.tab).classList.add('active');
-    };
-  });
-
-  // safe fetch
-  async function api(path, opts={}) {
-    try{
+  async function api(path, opts = {}) {
+    try {
       const r = await fetch(path, opts);
       return await r.json();
-    }catch(e){ console.error('API error',path,e); return null; }
+    } catch (e) {
+      console.error('API error', path, e);
+      return null;
+    }
   }
 
-  // init
   async function init(){
     const meRes = await api('/me');
-    if(!meRes || !meRes.loggedIn) return location.href = '/login.html';
+    if(!meRes || !meRes.loggedIn) return location.href='/login.html';
     me = meRes.username; isAdmin = !!meRes.admin;
     socket.emit('registerUser', me);
     await Promise.all([loadFriendsAndRecent(), loadRooms(), loadDMList()]);
-    socket.emit('fetchFriends');
   }
 
-  // friends & recent
+  // FRIENDS & RECENT
   async function loadFriendsAndRecent(){
     const data = await api('/friends'); if(!data) return;
-    // friend requests
-    friendRequestsDiv.innerHTML='';
+    // requests
+    friendRequestsDiv.innerHTML = '';
     (data.requests||[]).forEach(r=>{
       const el = document.createElement('div'); el.className='list-item';
-      el.innerHTML = `<div>${escapeHtml(r)}</div><div><button class="btn secondary">Accept</button></div>`;
+      el.innerHTML = `<div>${r}</div><div><button class="btn secondary">Accept</button></div>`;
       el.querySelector('button').onclick = async (e)=> {
         e.stopPropagation();
-        await fetch('/accept-request',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ from: r })});
+        await fetch('/accept-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ from: r })});
         socket.emit('fetchFriends');
         await loadFriendsAndRecent();
-        pushNotification({ type:'friend', text:`You accepted ${r}`, time: Date.now() });
       };
       friendRequestsDiv.appendChild(el);
     });
 
     // friends
-    friendsListDiv.innerHTML=''; const seen = new Set();
+    friendsListDiv.innerHTML = '';
     (data.friends||[]).forEach(f=>{
-      if(seen.has(f.username)) return; seen.add(f.username);
       const el = document.createElement('div'); el.className='list-item';
-      el.innerHTML = `<div style="display:flex;align-items:center;gap:8px"><img src="${f.avatar||'/avatars/default.png'}" class="pfp"><div>${escapeHtml(f.username)}</div></div>`;
+      el.innerHTML = `<div style="display:flex;align-items:center;gap:8px"><img src="${f.avatar||'/avatars/default.png'}" class="pfp"><div>${f.username}</div></div>`;
       el.onclick = ()=> openDM(f.username);
       friendsListDiv.appendChild(el);
     });
 
     // recent
-    recentUsersDiv.innerHTML='';
+    recentUsersDiv.innerHTML = '';
     (data.recent||[]).forEach(u=>{
       const el = document.createElement('div'); el.className='list-item';
-      el.innerHTML = `<div style="display:flex;align-items:center;gap:8px"><img src="${u.avatar||'/avatars/default.png'}" class="pfp"><div>${escapeHtml(u.username)}</div></div><div><button class="btn secondary">Add</button></div>`;
-      el.querySelector('button').onclick = async (e)=>{
+      el.innerHTML = `<div style="display:flex;align-items:center;gap:8px"><img src="${u.avatar||'/avatars/default.png'}" class="pfp"><div>${u.username}</div></div><div><button class="btn secondary">Add</button></div>`;
+      el.querySelector('button').onclick = async (e)=> {
         e.stopPropagation();
-        const resp = await fetch('/friend-request',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ to: u.username })});
+        const resp = await fetch('/friend-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ to: u.username })});
         const j = await resp.json();
-        pushNotification({ type:'friend-request', text: j.success ? `Friend request sent to ${u.username}` : j.message||'Error', time: Date.now() });
+        showToast(j.success ? 'Requested' : (j.message || 'Error'));
         await loadFriendsAndRecent();
       };
       recentUsersDiv.appendChild(el);
     });
   }
 
-  // rooms
+  // ROOMS (show pfp + manage button if owner/admin)
   async function loadRooms(){
     const data = await api('/rooms'); if(!data) return;
-    roomsListDiv.innerHTML='';
-    Object.entries(data).forEach(([id,r])=>{
+    roomsListDiv.innerHTML = '';
+    Object.entries(data).forEach(([id, r])=>{
       const el = document.createElement('div'); el.className='list-item';
-      el.innerHTML = `<div style="display:flex;align-items:center;gap:8px">${r.pfp?`<img src="${r.pfp}" class="room-pfp">`:''}<div>${escapeHtml(r.name)}</div></div><div><button class="btn secondary">Join</button></div>`;
-      el.querySelector('button').onclick = ()=> openRoom(id, r.name, r.pfp);
+      // left: pfp + name + owner
+      const left = document.createElement('div'); left.style.display='flex'; left.style.alignItems='center';
+      const img = document.createElement('img'); img.className='room-pfp'; img.src = r.pfp || '/room_pfps/default.png';
+      const meta = document.createElement('div');
+      meta.innerHTML = `<div style="font-weight:600">${r.name}</div><div style="font-size:12px;color:var(--muted)">owner: ${r.owner||'—'}</div>`;
+      left.appendChild(img); left.appendChild(meta);
+
+      const right = document.createElement('div');
+      const joinBtn = document.createElement('button'); joinBtn.className='btn secondary'; joinBtn.textContent='Join';
+      joinBtn.onclick = ()=> openRoom(id, r.name);
+      right.appendChild(joinBtn);
+
+      // manage if owner or admin
+      if (r.owner === me || isAdmin) {
+        const manage = document.createElement('button'); manage.className='room-manage'; manage.textContent='Manage';
+        manage.onclick = (e) => {
+          e.stopPropagation();
+          openRoomManageDialog(id, r);
+        };
+        right.appendChild(manage);
+      }
+
+      el.appendChild(left); el.appendChild(right);
+      el.onclick = () => openRoom(id, r.name);
       roomsListDiv.appendChild(el);
     });
   }
+
+  // room manage dialog (simple prompt to upload or set URL)
+  function openRoomManageDialog(roomId, roomObj){
+    // create an invisible file input and a small prompt for url
+    const fileInput = document.createElement('input'); fileInput.type='file'; fileInput.accept='image/*';
+    fileInput.onchange = async (ev) => {
+      if (!fileInput.files || fileInput.files.length === 0) return;
+      const fd = new FormData();
+      fd.append('pfp', fileInput.files[0]);
+      fd.append('roomId', roomId);
+      const res = await fetch('/update-room-pfp', { method:'POST', body: fd });
+      const j = await res.json();
+      if (j.success) { showToast('Room image updated'); await loadRooms(); }
+      else alert(j.message || 'Failed');
+    };
+
+    const url = prompt('Paste image URL to set as room image (leave empty to upload a file):');
+    if (url && url.trim()) {
+      // set by url
+      fetch('/update-room-pfp', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ roomId, pfpUrl: url.trim() }) })
+        .then(r=>r.json()).then(j=>{ if(j.success){ showToast('Room image updated'); loadRooms(); } else alert(j.message||'Failed'); })
+        .catch(e=>{ alert('Failed'); });
+    } else {
+      // trigger file input
+      fileInput.click();
+    }
+  }
+
+  // Create room button
   document.getElementById('createRoomBtn').onclick = async ()=>{
     const name = document.getElementById('roomName').value.trim();
-    if(!name) return alert('Enter a room name');
-    const res = await fetch('/create-room',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ name })});
+    if (!name) return alert('Enter a room name');
+    const res = await fetch('/create-room', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ name }) });
     const j = await res.json();
-    if(j.success){ await loadRooms(); openRoom(j.roomId, name); socket.emit('roomsUpdated'); pushNotification({type:'room', text:`Room created: ${name}`, time:Date.now()}); }
+    if (j.success) { await loadRooms(); openRoom(j.roomId, name); socket.emit('roomsUpdated'); }
     else alert(j.message || 'Create failed');
   };
 
-  function openRoom(id, name, pfp){
-    current = { type:'room', id };
-    chatTitle.textContent = `# ${name}`;
-    if(pfp){ roomPfp.src = pfp; roomPfp.style.display = 'inline-block'; } else { roomPfp.style.display = 'none'; }
+  // open room
+  function openRoom(id, name){
+    current = { type: 'room', id };
+    setChatHeaderRoom(id, name);
     chatMessages.innerHTML = '';
     chatOverlay.classList.remove('hidden'); chatOverlay.setAttribute('aria-hidden','false');
     socket.emit('joinRoom', { roomId: id });
   }
 
-  // DM list
+  async function setChatHeaderRoom(id, name){
+    // fetch room info to show pfp
+    const info = await api(`/room-info/${id}`);
+    const pfp = (info && info.success && info.pfp) ? info.pfp : '/room_pfps/default.png';
+    chatTitle.innerHTML = `<img src="${pfp}" style="width:32px;height:32px;border-radius:6px;margin-right:8px"> <span># ${name}</span>`;
+  }
+
+  // DMs
   async function loadDMList(){
     const data = await api('/friends'); if(!data) return;
-    dmListDiv.innerHTML='';
-    const friends = (data.friends||[]).map(f=>({...f, unread: unreadDMs.has(f.username)}));
-    friends.sort((a,b)=> (b.unread?1:0) - (a.unread?1:0));
-    friends.forEach(f=>{
+    dmListDiv.innerHTML = '';
+    let arr = (data.friends||[]).map(f=>({ ...f, unread: unreadDMs.has(f.username) }));
+    // unread first
+    arr.sort((a,b)=> (b.unread?1:0) - (a.unread?1:0));
+    arr.forEach(f=>{
       const el = document.createElement('div'); el.className='list-item';
-      el.innerHTML = `<div style="display:flex;align-items:center;gap:8px">
-                        <img src="${f.avatar||'/avatars/default.png'}" class="pfp">
-                        <div>@ ${escapeHtml(f.username)}</div>
-                      </div>
-                      <div>${f.unread?'<div class="unread-dot"></div>':''}</div>`;
+      el.innerHTML = `<div style="display:flex;align-items:center;gap:8px"><img src="${f.avatar||'/avatars/default.png'}" class="pfp"><div>@ ${f.username}</div>${f.unread?'<div class="unread-dot"></div>':''}</div>`;
       el.onclick = ()=> openDM(f.username);
       dmListDiv.appendChild(el);
     });
   }
 
   async function openDM(username){
-    current = { type:'dm', id: username };
+    current = { type: 'dm', id: username };
     chatTitle.textContent = `@ ${username}`;
-    roomPfp.style.display = 'none';
     chatMessages.innerHTML = '';
     const r = await api(`/dm/${username}`);
-    if(r && r.success) (r.messages||[]).forEach(m => appendMessage(m));
+    if (r && r.success) (r.messages||[]).forEach(m=>appendMessage(m));
     chatOverlay.classList.remove('hidden'); chatOverlay.setAttribute('aria-hidden','false');
-    // clear unread
     unreadDMs.delete(username);
-    await loadDMList();
+    loadDMList();
   }
 
-  // message UI
-  function createMessageElement(m, isTemp=false){
-    if(!m) return null;
-    const el = document.createElement('div');
-    el.className = 'chat-message' + (m.sender === me ? ' me' : '') + (isTemp ? ' temp' : '');
-    el.dataset.msgid = m.id || '';
-    const av = document.createElement('img'); av.className = 'pfp'; av.src = m.avatar || '/avatars/default.png';
-
-    const bubble = document.createElement('div'); bubble.className = 'bubble';
-
-    // quoted / reply preview (if this message is a reply)
-    if(m.replyTo){
-      // find original message text if already loaded
-      const target = chatMessages.querySelector(`[data-msgid="${m.replyTo}"]`);
-      let snippet = 'original message';
-      if(target){
-        const t = target.querySelector('.msg-text');
-        if(t) snippet = t.innerText.slice(0, 120);
-      } else {
-        snippet = '(original message not in view)';
-      }
-      const quoted = document.createElement('div'); quoted.className = 'quoted';
-      quoted.innerText = snippet;
-      quoted.onclick = ()=> {
-        const target2 = chatMessages.querySelector(`[data-msgid="${m.replyTo}"]`);
-        if(target2) target2.scrollIntoView({ behavior:'smooth', block:'center' });
-      };
-      bubble.appendChild(quoted);
-    }
-
-    const meta = document.createElement('div');
-    meta.style.cssText = "font-size:12px;color:var(--muted)";
-    meta.innerText = `${m.sender} • ${new Date(m.time||Date.now()).toLocaleString()}`;
-
-    const msgDiv = document.createElement('div');
-    msgDiv.className = 'msg-text';
-    msgDiv.style.marginTop = '6px';
-    msgDiv.innerText = m.message || '';
-
-    bubble.appendChild(meta);
-    bubble.appendChild(msgDiv);
-
-    if(m.sender === me || isAdmin){
+  function createMessageElement(m){
+    const el = document.createElement('div'); el.className = 'chat-message' + (m.sender===me ? ' me' : '');
+    el.dataset.msgid = m.id;
+    const av = document.createElement('img'); av.src = m.avatar || '/avatars/default.png'; av.className='pfp';
+    const bubble = document.createElement('div'); bubble.className='bubble';
+    bubble.innerHTML = `<div style="font-size:12px;color:var(--muted)">${m.sender} • ${new Date(m.time||Date.now()).toLocaleString()}</div><div style="margin-top:6px">${escapeHtml(m.message||'')}</div>`;
+    if (m.sender===me || isAdmin) {
       const actions = document.createElement('div');
       actions.className = 'actions';
       actions.innerHTML = `<span data-act="reply">Reply</span> <span data-act="edit">Edit</span> <span data-act="delete">Delete</span>`;
-      actions.onclick = (e)=>{
+      actions.onclick = async (e) => {
         const act = e.target.dataset.act;
-        if(act === 'reply'){
-          replyTo = m.id;
-          replyText.innerText = `${m.sender}: ${m.message?.slice(0,120)}`;
-          replyPreview.style.display = 'flex';
-          chatInput.focus();
+        if (act === 'reply') { chatInput.value = `@${m.sender} ${chatInput.value}`; chatInput.focus(); }
+        if (act === 'edit') {
+          const newMsg = prompt('Edit message:', m.message);
+          if (!newMsg) return;
+          await fetch('/edit-message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: m.id, newMsg, dmWith: current?.type==='dm' ? current.id : undefined, roomId: current?.type==='room' ? current.id : undefined }) });
         }
-        if(act === 'edit'){
-          const newText = prompt('Edit message', m.message);
-          if(newText != null){
-            if(current?.type === 'dm') fetch('/edit-message',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ id:m.id, dmWith: current.id, newMsg: newText })});
-            else if(current?.type === 'room') fetch('/edit-message',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ id:m.id, roomId: current.id, newMsg: newText })});
-          }
-        }
-        if(act === 'delete'){
-          if(!confirm('Delete message?')) return;
-          if(current?.type === 'dm') fetch('/delete-message',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ id:m.id, dmWith: current.id })});
-          else if(current?.type === 'room') fetch('/delete-message',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ id:m.id, roomId: current.id })});
+        if (act === 'delete') {
+          if (!confirm('Delete message?')) return;
+          await fetch('/delete-message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: m.id, dmWith: current?.type==='dm' ? current.id : undefined, roomId: current?.type==='room' ? current.id : undefined }) });
+          const container = chatMessages.querySelector(`[data-msgid="${m.id}"]`);
+          if (container) container.remove();
         }
       };
       bubble.appendChild(actions);
     }
-
     el.appendChild(av); el.appendChild(bubble);
     return el;
   }
 
   function appendMessage(m){
     if(!m || !m.id) return;
-    if(chatMessages.querySelector(`[data-msgid="${m.id}"]`)) return;
-
-    // try to replace optimistic temp
-    const temps = Array.from(chatMessages.querySelectorAll('.chat-message.temp'));
-    for(const t of temps){
-      const txtNode = t.querySelector('.msg-text');
-      if(!txtNode) continue;
-      const displayed = txtNode.innerText;
-      if(displayed === (m.message||'') && t.classList.contains(m.sender === me ? 'me' : '')){
-        t.dataset.msgid = m.id;
-        t.classList.remove('temp');
-        const bubble = t.querySelector('.bubble');
-        if(bubble){
-          const meta = bubble.querySelector('div');
-          if(meta) meta.innerText = `${m.sender} • ${new Date(m.time||Date.now()).toLocaleString()}`;
-          const msgText = bubble.querySelector('.msg-text');
-          if(msgText) msgText.innerText = m.message || '';
-        }
-        const img = t.querySelector('img.pfp');
-        if(img && m.avatar) img.src = m.avatar;
-        t.classList.remove('temp');
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-        return;
-      }
-    }
-
-    const node = createMessageElement(m, false);
-    if(node){
-      chatMessages.appendChild(node);
-      chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
+    if (document.querySelector(`[data-msgid="${m.id}"]`)) return;
+    const el = createMessageElement(m);
+    chatMessages.appendChild(el);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 
-  function createMessageElement(m, isTemp){
-    return createMessageElementInner(m, isTemp);
-  }
-
-  // we need a small wrapper to avoid duplicate function names
-  function createMessageElementInner(m, isTemp){
-    return (function(){ /* implemented above in createMessageElement */ return (function(){ /* placeholder */ })() })();
-  }
-
-  // Because of above duplication, implement a direct wrapper to the earlier createMessageElement body:
-  function createMessageElement(m, isTemp=false){
-    const el = document.createElement('div');
-    el.className = 'chat-message' + (m.sender === me ? ' me' : '') + (isTemp ? ' temp' : '');
-    el.dataset.msgid = m.id || '';
-    const av = document.createElement('img'); av.className = 'pfp'; av.src = m.avatar || '/avatars/default.png';
-
-    const bubble = document.createElement('div'); bubble.className = 'bubble';
-
-    if(m.replyTo){
-      const target = chatMessages.querySelector(`[data-msgid="${m.replyTo}"]`);
-      let snippet = '(original message)';
-      if(target){
-        const t = target.querySelector('.msg-text');
-        if(t) snippet = t.innerText.slice(0,120);
-      }
-      const quoted = document.createElement('div'); quoted.className = 'quoted';
-      quoted.innerText = snippet;
-      quoted.onclick = ()=> {
-        const target2 = chatMessages.querySelector(`[data-msgid="${m.replyTo}"]`);
-        if(target2) target2.scrollIntoView({ behavior:'smooth', block:'center' });
-      };
-      bubble.appendChild(quoted);
-    }
-
-    const meta = document.createElement('div');
-    meta.style.cssText = "font-size:12px;color:var(--muted)";
-    meta.innerText = `${m.sender} • ${new Date(m.time||Date.now()).toLocaleString()}`;
-
-    const msgDiv = document.createElement('div');
-    msgDiv.className = 'msg-text';
-    msgDiv.style.marginTop = '6px';
-    msgDiv.innerText = m.message || '';
-
-    bubble.appendChild(meta);
-    bubble.appendChild(msgDiv);
-
-    if(m.sender === me || isAdmin){
-      const actions = document.createElement('div');
-      actions.className = 'actions';
-      actions.innerHTML = `<span data-act="reply">Reply</span> <span data-act="edit">Edit</span> <span data-act="delete">Delete</span>`;
-      actions.onclick = (e)=>{
-        const act = e.target.dataset.act;
-        if(act === 'reply'){
-          replyTo = m.id;
-          replyText.innerText = `${m.sender}: ${m.message?.slice(0,120)}`;
-          replyPreview.style.display = 'flex';
-          chatInput.focus();
-        }
-        if(act === 'edit'){
-          const newText = prompt('Edit message', m.message);
-          if(newText != null){
-            if(current?.type === 'dm') fetch('/edit-message',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ id:m.id, dmWith: current.id, newMsg: newText })});
-            else if(current?.type === 'room') fetch('/edit-message',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ id:m.id, roomId: current.id, newMsg: newText })});
-          }
-        }
-        if(act === 'delete'){
-          if(!confirm('Delete message?')) return;
-          if(current?.type === 'dm') fetch('/delete-message',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ id:m.id, dmWith: current.id })});
-          else if(current?.type === 'room') fetch('/delete-message',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ id:m.id, roomId: current.id })});
-        }
-      };
-      bubble.appendChild(actions);
-    }
-
-    el.appendChild(av); el.appendChild(bubble);
-    return el;
-  }
-
-  function appendTempMessage(m){
-    const node = createMessageElement(m, true);
-    if(node){
-      chatMessages.appendChild(node);
-      chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
-  }
-
-  // send message (include replyTo if set)
-  sendBtn.onclick = sendMessage;
-  chatInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') sendMessage(); });
-  clearReplyBtn.onclick = ()=> { replyTo = null; replyPreview.style.display='none'; replyText.innerText=''; };
-
+  // send
   async function sendMessage(){
     const txt = chatInput.value.trim();
-    if(!txt) return;
-    if(!current) return alert('Open a room or DM first');
-    if(txt.length > 300) return alert('Message length max 300');
-    const tempId = 'temp-' + Date.now() + '-' + Math.floor(Math.random()*9999);
-    const tempMsg = {
-      id: tempId,
-      sender: me,
-      avatar: null,
-      message: txt,
-      time: Date.now(),
-      to: current.type === 'dm' ? current.id : undefined,
-      roomId: current.type === 'room' ? current.id : undefined,
-      replyTo: replyTo || null
-    };
-    appendTempMessage(tempMsg);
-
-    if(current.type === 'room') socket.emit('roomMessage', { roomId: current.id, message: txt, replyTo: replyTo || null });
-    else socket.emit('dmMessage', { to: current.id, message: txt, replyTo: replyTo || null });
-
+    if (!txt) return;
+    if (!current) return alert('Open a room or DM first');
+    if (current.type === 'room') {
+      socket.emit('roomMessage', { roomId: current.id, message: txt });
+    } else {
+      // optimistic append for DM sender
+      const temp = { id: 'temp-'+Date.now(), sender: me, avatar: null, message: txt, time: Date.now(), to: current.id };
+      appendMessage(temp);
+      socket.emit('dmMessage', { to: current.id, message: txt });
+    }
     chatInput.value = '';
-    replyTo = null;
-    replyPreview.style.display = 'none';
   }
+  sendBtn.onclick = sendMessage;
+  chatInput.addEventListener('keydown', e=> { if (e.key === 'Enter') sendMessage(); });
 
   // socket handlers
   socket.on('chatHistory', msgs => {
@@ -536,86 +365,42 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
   });
 
   socket.on('roomMessage', m => {
-    if(current?.type === 'room' && current.id === m.roomId) appendMessage(m);
+    if (current?.type === 'room' && current.id === m.roomId) appendMessage(m);
   });
 
   socket.on('dmMessage', m => {
-    if(current?.type === 'dm' && (current.id === m.sender || current.id === (m.to || null))) {
+    // if DM currently open with partner -> append
+    if (current?.type === 'dm' && (current.id === m.sender || current.id === m.to)) {
       appendMessage(m);
     } else {
-      const other = m.sender === me ? (m.to || '') : m.sender;
-      if(other) unreadDMs.add(other);
-      awaitLoadDMList();
-      pushNotification({ type:'dm', text: `New DM from ${m.sender}`, time: Date.now() });
+      const other = (m.sender === me) ? m.to : m.sender;
+      unreadDMs.add(other);
+      loadDMList();
+      showToast(`New DM from ${m.sender}`);
     }
   });
 
-  socket.on('dmNotification', ({ from }) => {
-    pushNotification({ type:'dm', text: `New DM from ${from}`, time: Date.now() });
+  socket.on('dmNotification', ({from}) => {
+    showToast(`New DM from ${from}`);
   });
 
-  socket.on('friendRequest', from => {
-    pushNotification({ type:'friend-request', text: `Friend request from ${from}`, time: Date.now() });
-    awaitLoadFriends();
-  });
-
-  socket.on('friendsUpdate', ()=> {
-    awaitLoadFriends();
-    awaitLoadDMList();
-  });
-
+  socket.on('friendsUpdate', ()=> { loadFriendsAndRecent(); loadDMList(); });
   socket.on('roomsUpdated', ()=> loadRooms());
-  socket.on('roomUpdated', ({ roomId, room }) => {
-    // if current room open, update header pfp
-    if(current?.type === 'room' && current.id === roomId) {
-      if(room.pfp){ roomPfp.src = room.pfp; roomPfp.style.display = 'inline-block'; } else roomPfp.style.display = 'none';
-    }
-    loadRooms();
-  });
-  socket.on('roomKicked', ({ roomId, by }) => {
-    if(current?.type === 'room' && current.id === roomId){ alert(`You were kicked from room by ${by}`); chatOverlay.classList.add('hidden'); current = null; }
-  });
-
   socket.on('updateMessage', msg => {
-    const el = chatMessages.querySelector(`[data-msgid="${msg.id}"]`);
-    if(el){
-      const txt = el.querySelector('.msg-text');
-      if(txt) txt.innerText = msg.message || '';
-    }
+    const el = chatMessages.querySelector(`[data-msgid="${msg.id}"] .bubble div:nth-child(2)`);
+    if (el) el.textContent = msg.message || '';
   });
-
   socket.on('deleteMessage', id => {
     const el = chatMessages.querySelector(`[data-msgid="${id}"]`);
-    if(el) el.remove();
+    if (el) el.remove();
   });
 
-  // refresh helpers
-  let friendsLoadTimer = 0;
-  function awaitLoadFriends(){ if(friendsLoadTimer) clearTimeout(friendsLoadTimer); friendsLoadTimer = setTimeout(()=> loadFriendsAndRecent(), 100); }
-  let dmLoadTimer = 0;
-  function awaitLoadDMList(){ if(dmLoadTimer) clearTimeout(dmLoadTimer); dmLoadTimer = setTimeout(()=> loadDMList(), 100); }
+  socket.on('connect', ()=> socket.emit('fetchFriends'));
 
-  // search friend/user
-  document.getElementById('searchBtn').onclick = async ()=>{
-    const q = document.getElementById('searchUser').value.trim();
-    if(!q) return alert('Enter username');
-    recentUsersDiv.innerHTML = '';
-    const el = document.createElement('div'); el.className='list-item';
-    el.innerHTML = `<div>${escapeHtml(q)}</div><div><button class="btn secondary">Add</button></div>`;
-    el.querySelector('button').onclick = async ()=> {
-      const resp = await fetch('/friend-request',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ to: q })});
-      const j = await resp.json();
-      pushNotification({ type:'friend-request', text: j.success ? `Friend request sent to ${q}` : j.message || 'Error', time: Date.now() });
-      awaitLoadFriends();
-    };
-    recentUsersDiv.appendChild(el);
-  };
-
-  closeChatBtn.onclick = ()=> { chatOverlay.classList.add('hidden'); chatOverlay.setAttribute('aria-hidden','true'); current = null; replyTo = null; replyPreview.style.display='none'; };
-
+  // helper
   function escapeHtml(s){ return (s||'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-  // initial run
+  // initialize
   await init();
 
 })();
