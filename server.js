@@ -24,27 +24,28 @@ app.use(session({
 
 app.use(express.static(path.join(__dirname, "public")));
 
+// --- In-memory store ---
 const store = {
-  users: {},
-  rooms: []
+  users: {},       // { username: { username, admin } }
+  rooms: []        // { name }
 };
 
 const ADMIN_USERS = ["admin"];
 
-// Routes same as before
+// --- Routes ---
 app.post("/signup", (req,res)=>{
   const {username} = req.body;
   if(!username) return res.status(400).json({error:"Username required"});
   if(store.users[username]) return res.status(400).json({error:"User exists"});
-  store.users[username]={username,admin:ADMIN_USERS.includes(username)};
-  req.session.user=username;
+  store.users[username] = {username, admin: ADMIN_USERS.includes(username)};
+  req.session.user = username;
   res.json({success:true});
 });
 
 app.post("/login", (req,res)=>{
   const {username} = req.body;
-  if(!username||!store.users[username]) return res.status(400).json({error:"Invalid"});
-  req.session.user=username;
+  if(!username || !store.users[username]) return res.status(400).json({error:"Invalid username"});
+  req.session.user = username;
   res.json({success:true});
 });
 
@@ -54,29 +55,34 @@ app.post("/logout",(req,res)=>{
 
 app.get("/me",(req,res)=>{
   if(!req.session.user) return res.json({loggedIn:false});
-  const u=store.users[req.session.user];
+  const u = store.users[req.session.user];
   if(!u) return res.json({loggedIn:false});
-  res.json({loggedIn:true,username:u.username,admin:u.admin});
+  res.json({loggedIn:true, username:u.username, admin:u.admin});
 });
 
 app.get("/users",(req,res)=>{
-  const arr=Object.values(store.users).map(u=>({username:u.username,admin:u.admin}));
+  const arr = Object.values(store.users).map(u=>({username:u.username, admin:u.admin}));
   res.json(arr);
 });
 
 app.get("/rooms",(req,res)=>res.json(store.rooms));
 app.post("/rooms",(req,res)=>{
-  const {name}=req.body;
+  const {name} = req.body;
   if(!name) return res.status(400).json({error:"Room name required"});
   if(store.rooms.find(r=>r.name===name)) return res.status(400).json({error:"Room exists"});
   store.rooms.push({name});
   res.json({success:true});
 });
 
-// Socket.IO
+// --- Socket.IO ---
 io.on("connection", socket=>{
-  let username=null;
-  socket.on("registerUser", u=>{ username=u; });
+  let username = null;
+
+  socket.on("registerUser", u=>{ 
+    username = u;
+    socket.username = u;
+  });
+
   socket.on("chatMessage", ({to,msg})=>{
     for(let s of io.sockets.sockets.values()){
       if(s.id===socket.id) continue;
