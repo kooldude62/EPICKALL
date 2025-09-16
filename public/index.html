@@ -206,10 +206,43 @@ function createMessageElement(m){
 }
 
 function appendMessage(m){
-  if(!m || !m.id) return;
-  if(document.querySelector(`[data-msgid="${m.id}"]`)) return;
-  const el = createMessageElement(m); chatMessages.appendChild(el); chatMessages.scrollTop = chatMessages.scrollHeight;
+    if(!m || !m.id) return;
+
+    // Prevent duplicates: check exact id first
+    if(document.querySelector(`[data-msgid="${m.id}"]`)) return;
+
+    // Try to find a temporary optimistic message to replace
+    const candidates = Array.from(chatMessages.querySelectorAll('.chat-message'))
+        .filter(n=>{
+            const id = n.dataset.msgid||'';
+            return id.startsWith('temp-') && n.classList.contains(m.sender===me?'me':'');
+        });
+
+    for(const c of candidates){
+        const bubble = c.querySelector('.bubble');
+        if(!bubble) continue;
+        const nodes = bubble.querySelectorAll('div');
+        const msgTextNode = nodes.length>1 ? nodes[1] : nodes[0];
+        const displayed = msgTextNode ? msgTextNode.innerText : '';
+        if(displayed === (m.message||'')){
+            // Replace temp with real message
+            c.dataset.msgid = m.id;
+            c.querySelector('.bubble').innerHTML =
+                `<div style="font-size:12px;color:var(--muted)">${m.sender} • ${new Date(m.time||Date.now()).toLocaleString()}</div>
+                 <div style="margin-top:6px">${escapeHtml(m.message||'')}</div>`;
+            const img = c.querySelector('img.pfp');
+            if(img && m.avatar) img.src = m.avatar;
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return;
+        }
+    }
+
+    // Otherwise append normally
+    const el = createMessageElement(m);
+    chatMessages.appendChild(el);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
 }
+
 
 function sendMessage(){
   const txt = chatInput.value.trim(); if(!txt) return; if(txt.length>300) return alert('Message length max 300'); if(!current) return alert('Open a room or DM first');
