@@ -1,351 +1,188 @@
-import express from "express";
-import session from "express-session";
-import bodyParser from "body-parser";
-import { createServer } from "http";
-import { Server } from "socket.io";
-import multer from "multer";
-import path from "path";
-import { fileURLToPath } from "url";
-import fs from "fs";
-import crypto from "crypto";
-import bcrypt from "bcryptjs";
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Epick Chat</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+:root{ --bg:#0f1114; --panel:rgba(255,255,255,0.04); --muted:rgba(255,255,255,0.6); --accent:#6b8cff; --glass:rgba(255,255,255,0.03); --glass-2:rgba(255,255,255,0.02) }
+*{box-sizing:border-box;} 
+body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#071021,#0f1114);color:#e8eefc;min-height:100vh} 
+.navbar{display:flex;justify-content:space-between;padding:12px 20px;background:var(--glass-2);border-bottom:1px solid rgba(255,255,255,0.02)} 
+.tabs{display:flex;gap:8px;margin:16px;padding:0 12px} 
+.tab{padding:10px 12px;border-radius:10px;background:var(--glass-2);cursor:pointer;color:var(--muted)} 
+.tab.active{background:linear-gradient(90deg, rgba(107,140,255,0.12), rgba(107,140,255,0.06));color:#fff} 
+main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px} 
+.panel{background:var(--panel);border-radius:12px;padding:12px;min-height:60vh;display:none;flex-direction:column;gap:12px} 
+.panel.active{display:flex} 
+.list{display:flex;flex-direction:column;gap:6px;max-height:56vh;overflow:auto;padding-right:6px} 
+.list-item{display:flex;align-items:center;justify-content:space-between;padding:8px;border-radius:8px;background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));cursor:pointer} 
+.pfp{width:36px;height:36px;border-radius:50%;object-fit:cover;border:1px solid rgba(255,255,255,0.04)} 
+.unread-dot{width:10px;height:10px;border-radius:50%;background:#6b8cff;display:inline-block;margin-left:6px} 
+.chat-overlay{position:fixed;inset:0;background:linear-gradient(180deg, rgba(1,4,8,0.85), rgba(1,4,8,0.95));display:flex;flex-direction:column;z-index:1200;opacity:1;transition:opacity .12s} 
+.chat-overlay.hidden{display:none} 
+.chat-messages{flex:1;padding:18px;overflow:auto;display:flex;flex-direction:column;gap:10px} 
+.chat-input{display:flex;gap:8px;padding:14px;border-top:1px solid rgba(255,255,255,0.02)} 
+.chat-input input{flex:1;padding:12px;border-radius:10px;background:rgba(255,255,255,0.02);color:#fff;border:1px solid rgba(255,255,255,0.03)} 
+.chat-message{display:flex;gap:10px;align-items:flex-start} 
+.chat-message .bubble{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:10px;border-radius:10px;max-width:72%} 
+.chat-message.me .bubble{background:linear-gradient(180deg, rgba(107,140,255,0.14), rgba(107,140,255,0.08));align-self:flex-end} 
+.btn{padding:8px 10px;border-radius:8px;border:none;background:var(--accent);color:#05102a;cursor:pointer} 
+.btn.secondary{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted)} 
+.small{font-size:13px;color:var(--muted)} 
+</style>
+</head>
+<body>
+<div class="navbar">
+  <div class="brand">Epick Chat</div>
+  <div style="display:flex;gap:8px">
+    <button id="accountBtn" class="btn secondary">Account</button>
+    <button id="logoutBtn" class="btn secondary">Logout</button>
+  </div>
+</div>
+<div class="tabs">
+  <div class="tab active" data-tab="friends">Friends</div>
+  <div class="tab" data-tab="rooms">Rooms</div>
+  <div class="tab" data-tab="dms">DMs</div>
+</div>
+<main>
+  <section id="friends" class="panel active">
+    <div style="display:flex;gap:8px">
+      <input id="searchUser" placeholder="Search username">
+      <button id="searchBtn" class="btn secondary">Search</button>
+    </div>
+    <h4>Recently Registered</h4>
+    <div id="recentUsers" class="list"></div>
+    <h4>Requests</h4>
+    <div id="friendRequests" class="list"></div>
+    <h4>Your Friends</h4>
+    <div id="friendsList" class="list"></div>
+  </section>
+  <section id="rooms" class="panel">
+    <div style="display:flex;gap:8px">
+      <input id="roomName" placeholder="Room name">
+      <button id="createRoomBtn" class="btn">Create Room</button>
+    </div>
+    <h4>Available Rooms</h4>
+    <div id="roomsList" class="list"></div>
+  </section>
+  <section id="dms" class="panel">
+    <h4>Direct Messages</h4>
+    <div id="dmList" class="list"></div>
+  </section>
+</main>
+<div id="chatOverlay" class="chat-overlay hidden" aria-hidden="true">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;border-bottom:1px solid rgba(255,255,255,0.02)">
+    <div id="chatTitle">Chat</div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button id="closeChat" class="btn secondary">Close</button>
+    </div>
+  </div>
+  <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
+  <div class="chat-input">
+    <input id="chatInput" maxlength="300" placeholder="Type a message (Enter to send)">
+    <button id="sendBtn" class="btn">Send</button>
+  </div>
+</div>
+<script>
+(async function(){
+const socket = io();
+let me = null, isAdmin = false, current = null, unreadDMs = new Set();
+const tabs = document.querySelectorAll('.tab');
+const panels = document.querySelectorAll('.panel');
+const dmListDiv = document.getElementById('dmList');
+const chatOverlay = document.getElementById('chatOverlay');
+const chatTitle = document.getElementById('chatTitle');
+const chatMessages = document.getElementById('chatMessages');
+const chatInput = document.getElementById('chatInput');
+const sendBtn = document.getElementById('sendBtn');
+const closeChatBtn = document.getElementById('closeChat');
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const DATA_FILE = path.join(__dirname, "data.json");
-const AVATAR_DIR = path.join(__dirname, "public", "avatars");
+tabs.forEach(tab=>tab.addEventListener('click', ()=>{
+  tabs.forEach(t=>t.classList.remove('active'));
+  panels.forEach(p=>p.classList.remove('active'));
+  tab.classList.add('active');
+  document.getElementById(tab.dataset.tab).classList.add('active');
+}));
 
-if (!fs.existsSync(AVATAR_DIR)) fs.mkdirSync(AVATAR_DIR, { recursive: true });
-
-// load / save helpers
-function loadData() {
-  try {
-    if (fs.existsSync(DATA_FILE)) {
-      const raw = fs.readFileSync(DATA_FILE, "utf8");
-      return JSON.parse(raw);
-    }
-  } catch (e) {
-    console.error("Failed to load data.json", e);
-  }
-  return { users: {}, friendRequests: {}, rooms: {}, dms: {} };
+function rebuildDMList(friends){
+  dmListDiv.innerHTML = '';
+  friends.sort((a,b)=>{
+    const au = unreadDMs.has(a.username);
+    const bu = unreadDMs.has(b.username);
+    if(au && !bu) return -1;
+    if(bu && !au) return 1;
+    return a.username.localeCompare(b.username);
+  });
+  friends.forEach(f=>{
+    const el = document.createElement('div');
+    el.className='list-item';
+    el.innerHTML = `<div>@ ${f.username}${unreadDMs.has(f.username)?'<span class="unread-dot"></span>':''}</div>`;
+    el.onclick = ()=>{ unreadDMs.delete(f.username); openDM(f.username); rebuildDMList(friends); };
+    dmListDiv.appendChild(el);
+  });
 }
-function saveData() {
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), "utf8");
-  } catch (e) {
-    console.error("Failed to save data.json", e);
-  }
+
+function openDM(username){
+  current={type:'dm',id:username};
+  chatTitle.textContent = `@ ${username}`;
+  chatMessages.innerHTML='';
+  fetch(`/dm/${username}`).then(r=>r.json()).then(r=>{
+    if(r.success) (r.messages||[]).forEach(m=>appendMessage(m));
+  });
+  chatOverlay.classList.remove('hidden');
+  chatOverlay.setAttribute('aria-hidden','false');
 }
 
-const store = loadData();
-const app = express();
-const httpServer = createServer(app);
-const io = new Server(httpServer);
-
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(
-  session({
-    secret: "supersecret",
-    resave: false,
-    saveUninitialized: false,
-    cookie: { secure: false },
-  })
-);
-app.use(express.static(path.join(__dirname, "public")));
-
-const upload = multer({ dest: path.join(__dirname, "tmp_uploads") });
-
-function genId() {
-  return crypto.randomBytes(5).toString("hex");
+function createMessageElement(m){
+  const el = document.createElement('div'); 
+  el.className = 'chat-message' + (m.sender===me ? ' me' : ''); 
+  el.dataset.msgid = m.id;
+  const bubble = document.createElement('div'); 
+  bubble.className='bubble';
+  bubble.innerHTML = `<div style="font-size:12px;color:var(--muted)">${m.sender} • ${new Date(m.time||Date.now()).toLocaleString()}</div><div style="margin-top:6px">${m.message||''}</div>`;
+  el.appendChild(bubble); 
+  return el;
 }
 
-function requireAuth(req, res, next) {
-  if (!req.session.user) return res.status(401).json({ loggedIn: false });
-  next();
+function appendMessage(m){
+  if(!m || !m.id) return;
+  if(document.querySelector(`[data-msgid="${m.id}"]`)) return;
+  const el = createMessageElement(m);
+  chatMessages.appendChild(el);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-// --- AUTH ---
-app.post("/signup", async (req, res) => {
-  const { username, password, avatarUrl } = req.body;
-  if (!username || !password)
-    return res.json({ success: false, message: "Missing fields" });
-  if (store.users[username])
-    return res.json({ success: false, message: "User exists" });
-  const hash = await bcrypt.hash(password, 10);
-  store.users[username] = {
-    username,
-    passwordHash: hash,
-    avatar: avatarUrl || "/avatars/default.png",
-    friends: [],
-    starredRooms: [],
-    createdAt: Date.now(),
-    admin: false,
-  };
-  store.friendRequests[username] = store.friendRequests[username] || [];
-  saveData();
-  req.session.user = username;
-  res.json({ success: true });
-});
+function sendMessage(){
+  const txt = chatInput.value.trim(); 
+  if(!txt) return; 
+  if(txt.length>300) return alert('Message length max 300'); 
+  if(!current) return alert('Open a room or DM first');
+  if(current.type==='dm') socket.emit('dmMessage',{to:current.id,message:txt});
+  chatInput.value='';
+}
 
-app.post("/login", async (req, res) => {
-  const { username, password } = req.body;
-  const u = store.users[username];
-  if (!u) return res.json({ success: false, message: "Invalid credentials" });
-  const ok = await bcrypt.compare(password, u.passwordHash);
-  if (!ok) return res.json({ success: false, message: "Invalid credentials" });
-  req.session.user = username;
-  res.json({
-    success: true,
-    username,
-    avatar: u.avatar,
-    admin: !!u.admin,
-  });
-});
+sendBtn.onclick = sendMessage;
+chatInput.addEventListener('keydown', e=>{ if(e.key==='Enter') sendMessage(); });
 
-app.post("/logout", (req, res) => {
-  req.session.destroy(() => res.json({ success: true }));
-});
-
-app.get("/me", (req, res) => {
-  if (!req.session.user) return res.json({ loggedIn: false });
-  const u = store.users[req.session.user];
-  if (!u) return res.json({ loggedIn: false });
-  res.json({
-    loggedIn: true,
-    username: u.username,
-    avatar: u.avatar,
-    starredRooms: u.starredRooms || [],
-    admin: !!u.admin,
-  });
-});
-
-// --- AVATAR ---
-app.post(
-  "/update-avatar",
-  requireAuth,
-  upload.single("avatar"),
-  (req, res) => {
-    const username = req.session.user;
-    let avatarUrl = null;
-    if (req.file) {
-      const ext = path.extname(req.file.originalname) || ".png";
-      const destName = `${username}_${Date.now()}${ext}`;
-      const destPath = path.join(AVATAR_DIR, destName);
-      try {
-        fs.renameSync(req.file.path, destPath);
-        avatarUrl = `/avatars/${destName}`;
-      } catch (e) {
-        return res.json({ success: false, message: "Upload failed" });
-      }
-    } else if (req.body.avatarUrl) avatarUrl = req.body.avatarUrl;
-    else return res.json({ success: false, message: "No avatar provided" });
-
-    store.users[username].avatar = avatarUrl;
-    saveData();
-    res.json({ success: true, avatar: avatarUrl });
+socket.on('dmMessage', m => {
+  if(current?.type==='dm' && (current.id===m.sender || current.id===m.to)) {
+    appendMessage(m);
+  } else {
+    unreadDMs.add(m.sender);
+    loadDMList();
   }
-);
-
-// --- FRIENDS ---
-app.get("/friends", requireAuth, (req, res) => {
-  const username = req.session.user;
-  const requests = store.friendRequests[username] || [];
-  store.users[username].friends = Array.from(
-    new Set(store.users[username].friends || [])
-  );
-  const friends = (store.users[username].friends || []).map((f) => ({
-    username: f,
-    avatar: store.users[f]?.avatar || "/avatars/default.png",
-  }));
-  const recent = Object.values(store.users)
-    .filter(
-      (u) =>
-        u.username !== username &&
-        !store.users[username].friends.includes(u.username)
-    )
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .slice(0, 10)
-    .map((u) => ({
-      username: u.username,
-      avatar: u.avatar || "/avatars/default.png",
-    }));
-  res.json({ requests, friends, recent });
 });
 
-// --- ROOMS ---
-app.get("/rooms", requireAuth, (req, res) => {
-  const result = {};
-  for (const [id, r] of Object.entries(store.rooms))
-    result[id] = { name: r.name, inviteOnly: !!r.inviteOnly };
-  res.json(result);
-});
+async function loadDMList(){
+  const data = await (await fetch('/friends')).json();
+  if(data) rebuildDMList(data.friends||[]);
+}
 
-app.post("/create-room", requireAuth, (req, res) => {
-  const { name, password, inviteOnly } = req.body;
-  if (!name?.trim())
-    return res.json({ success: false, message: "Room name required" });
-  const lower = name.trim().toLowerCase();
-  for (const r of Object.values(store.rooms))
-    if (r.name?.trim().toLowerCase() === lower)
-      return res.json({ success: false, message: "Room name already in use" });
+closeChatBtn.onclick = ()=>{ chatOverlay.classList.add('hidden'); chatOverlay.setAttribute('aria-hidden','true'); current=null; };
 
-  const id = genId();
-  store.rooms[id] = {
-    name: name.trim(),
-    password: password || "",
-    inviteOnly: !!inviteOnly,
-    users: [],
-    messages: [],
-  };
-  saveData();
-  io.emit("roomsUpdated");
-  res.json({
-    success: true,
-    roomId: id,
-    inviteLink: `${req.protocol}://${req.get("host")}/?invite=${id}`,
-  });
-});
-
-// --- DMs ---
-app.get("/dm/:friend", requireAuth, (req, res) => {
-  const me = req.session.user,
-    friend = req.params.friend;
-  if (!store.users[friend])
-    return res.json({ success: false, message: "User not found" });
-  const key = [me, friend].sort().join("_");
-  res.json({ success: true, messages: store.dms[key] || [] });
-});
-
-// --- Message editing/deleting endpoints ---
-app.post("/edit-message", requireAuth, (req, res) => {
-  const { id, roomId, newMsg, dmWith } = req.body;
-  const user = req.session.user;
-
-  // room
-  if (roomId && store.rooms[roomId]) {
-    const msg = (store.rooms[roomId].messages || []).find((m) => m.id === id);
-    if (!msg) return res.json({ success: false });
-    if (msg.sender !== user && !store.users[user].admin)
-      return res.json({ success: false });
-    msg.message = newMsg;
-    saveData();
-    io.to(roomId).emit("updateMessage", msg);
-    return res.json({ success: true });
-  }
-
-  // dm
-  if (dmWith) {
-    const key = [user, dmWith].sort().join("_");
-    const m = (store.dms[key] || []).find((mm) => mm.id === id);
-    if (!m) return res.json({ success: false });
-    if (m.sender !== user && !store.users[user].admin)
-      return res.json({ success: false });
-    m.message = newMsg;
-    saveData();
-    io.to(user).emit("updateMessage", m);
-    io.to(dmWith).emit("updateMessage", m);
-    return res.json({ success: true });
-  }
-
-  res.json({ success: false });
-});
-
-app.post("/delete-message", requireAuth, (req, res) => {
-  const { id, roomId, dmWith } = req.body;
-  const user = req.session.user;
-
-  if (roomId && store.rooms[roomId]) {
-    const idx = (store.rooms[roomId].messages || []).findIndex(
-      (m) => m.id === id
-    );
-    if (idx === -1) return res.json({ success: false });
-    const msg = store.rooms[roomId].messages[idx];
-    if (msg.sender !== user && !store.users[user].admin)
-      return res.json({ success: false });
-    store.rooms[roomId].messages.splice(idx, 1);
-    saveData();
-    io.to(roomId).emit("deleteMessage", id);
-    return res.json({ success: true });
-  }
-
-  if (dmWith) {
-    const key = [user, dmWith].sort().join("_");
-    const arr = store.dms[key] || [];
-    const idx = arr.findIndex((m) => m.id === id);
-    if (idx === -1) return res.json({ success: false });
-    const msg = arr[idx];
-    if (msg.sender !== user && !store.users[user].admin)
-      return res.json({ success: false });
-    arr.splice(idx, 1);
-    saveData();
-    io.to(user).emit("deleteMessage", id);
-    io.to(dmWith).emit("deleteMessage", id);
-    return res.json({ success: true });
-  }
-
-  res.json({ success: false });
-});
-
-// --- SOCKET.IO ---
-io.on("connection", (socket) => {
-  socket.on("registerUser", (username) => {
-    socket.username = username;
-    socket.join(username);
-  });
-
-  socket.on("joinRoom", ({ roomId }) => {
-    if (!roomId || !store.rooms[roomId]) return;
-    socket.join(roomId);
-    const messages = store.rooms[roomId].messages || [];
-    socket.emit("chatHistory", messages);
-  });
-
-  socket.on("roomMessage", ({ roomId, message }) => {
-    const sender = socket.username;
-    if (!sender || !roomId || !store.rooms[roomId] || !message) return;
-    const text = ("" + message).slice(0, 300);
-    const msgObj = {
-      id: genId(),
-      sender,
-      avatar: store.users[sender]?.avatar || "/avatars/default.png",
-      message: text,
-      time: Date.now(),
-      roomId,
-    };
-    store.rooms[roomId].messages = store.rooms[roomId].messages || [];
-    store.rooms[roomId].messages.push(msgObj);
-    saveData();
-    io.to(roomId).emit("roomMessage", msgObj);
-  });
-
-  socket.on("dmMessage", ({ to, message }) => {
-    const from = socket.username;
-    if (!from || !to || !store.users[to] || !message) return;
-    const text = ("" + message).slice(0, 300);
-    const msg = {
-      id: genId(),
-      sender: from,
-      to,
-      avatar: store.users[from]?.avatar || "/avatars/default.png",
-      message: text,
-      time: Date.now(),
-    };
-    const key = [from, to].sort().join("_");
-    store.dms[key] = store.dms[key] || [];
-    store.dms[key].push(msg);
-    saveData();
-
-    // 🔥 FIX: show immediately for sender too
-    io.to(to).emit("dmMessage", msg);
-    io.to(from).emit("dmMessage", msg);
-
-    // notification for receiver
-    io.to(to).emit("dmNotification", { from });
-  });
-});
-
-const PORT = process.env.PORT || 3000;
-httpServer.listen(PORT, () =>
-  console.log(`✅ Server running on http://localhost:${PORT}`)
-);
+await loadDMList();
+})();
+</script>
+</body>
+</html>
