@@ -1,9 +1,12 @@
-const express = require("express");
-const session = require("express-session");
-const fs = require("fs");
-const path = require("path");
-const http = require("http");
-const { Server } = require("socket.io");
+import express from "express";
+import session from "express-session";
+import path from "path";
+import { fileURLToPath } from "url";
+import http from "http";
+import { Server } from "socket.io";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
@@ -26,9 +29,9 @@ const store = {
   rooms: []
 };
 
-const ADMIN_USERS = ["admin"]; // default admin usernames
+const ADMIN_USERS = ["admin"];
 
-// Signup
+// Routes same as before
 app.post("/signup", (req,res)=>{
   const {username} = req.body;
   if(!username) return res.status(400).json({error:"Username required"});
@@ -38,7 +41,6 @@ app.post("/signup", (req,res)=>{
   res.json({success:true});
 });
 
-// Login
 app.post("/login", (req,res)=>{
   const {username} = req.body;
   if(!username||!store.users[username]) return res.status(400).json({error:"Invalid"});
@@ -46,12 +48,10 @@ app.post("/login", (req,res)=>{
   res.json({success:true});
 });
 
-// Logout
 app.post("/logout",(req,res)=>{
   req.session.destroy(()=>res.json({success:true}));
 });
 
-// Get me
 app.get("/me",(req,res)=>{
   if(!req.session.user) return res.json({loggedIn:false});
   const u=store.users[req.session.user];
@@ -59,13 +59,11 @@ app.get("/me",(req,res)=>{
   res.json({loggedIn:true,username:u.username,admin:u.admin});
 });
 
-// List all users
 app.get("/users",(req,res)=>{
   const arr=Object.values(store.users).map(u=>({username:u.username,admin:u.admin}));
   res.json(arr);
 });
 
-// Rooms
 app.get("/rooms",(req,res)=>res.json(store.rooms));
 app.post("/rooms",(req,res)=>{
   const {name}=req.body;
@@ -78,9 +76,7 @@ app.post("/rooms",(req,res)=>{
 // Socket.IO
 io.on("connection", socket=>{
   let username=null;
-
   socket.on("registerUser", u=>{ username=u; });
-
   socket.on("chatMessage", ({to,msg})=>{
     for(let s of io.sockets.sockets.values()){
       if(s.id===socket.id) continue;
