@@ -9,6 +9,13 @@
 *{box-sizing:border-box;} 
 body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#071021,#0f1114);color:#e8eefc;min-height:100vh} 
 .navbar{display:flex;justify-content:space-between;padding:12px 20px;background:var(--glass-2);border-bottom:1px solid rgba(255,255,255,0.02)} 
+.brand{font-weight:700;color:var(--accent)}
+.nav-actions{display:flex;gap:8px;align-items:center}
+.notifications {position:relative}
+.notif-btn {background:transparent;border:1px solid rgba(255,255,255,0.04);padding:6px 8px;border-radius:8px;color:var(--muted);cursor:pointer}
+.notif-count {position:absolute;right:-6px;top:-6px;background:var(--accent);color:#fff;font-size:12px;padding:2px 6px;border-radius:999px}
+.notif-pop {position:absolute;right:0;top:36px;background:var(--panel);border-radius:8px;padding:8px;min-width:220px;box-shadow:0 8px 30px rgba(0,0,0,0.6);display:none;z-index:2000}
+.notif-pop.visible{display:block}
 .tabs{display:flex;gap:8px;margin:16px;padding:0 12px} 
 .tab{padding:10px 12px;border-radius:10px;background:var(--glass-2);cursor:pointer;color:var(--muted)} 
 .tab.active{background:linear-gradient(90deg, rgba(107,140,255,0.12), rgba(107,140,255,0.06));color:#fff} 
@@ -31,47 +38,62 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
 .btn.secondary{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted)} 
 .small{font-size:13px;color:var(--muted)} 
 .unread-dot{width:10px;height:10px;border-radius:50%;background:var(--accent);margin-left:8px;flex-shrink:0}
+.temp { opacity: 0.85; filter: blur(0.2px); }
 </style>
 </head>
 <body>
 <div class="navbar">
   <div class="brand">Epick Chat</div>
-  <div style="display:flex;gap:8px">
+  <div class="nav-actions">
+    <div class="notifications">
+      <button id="notifBtn" class="notif-btn">Inbox</button>
+      <div id="notifCount" class="notif-count" style="display:none">0</div>
+      <div id="notifPop" class="notif-pop"></div>
+    </div>
     <button id="accountBtn" class="btn secondary">Account</button>
     <button id="logoutBtn" class="btn secondary">Logout</button>
   </div>
 </div>
+
 <div class="tabs">
   <div class="tab active" data-tab="friends">Friends</div>
   <div class="tab" data-tab="rooms">Rooms</div>
   <div class="tab" data-tab="dms">DMs</div>
 </div>
+
 <main>
   <section id="friends" class="panel active">
     <div style="display:flex;gap:8px">
       <input id="searchUser" placeholder="Search username">
       <button id="searchBtn" class="btn secondary">Search</button>
     </div>
+
     <h4>Recently Registered</h4>
     <div id="recentUsers" class="list"></div>
+
     <h4>Requests</h4>
     <div id="friendRequests" class="list"></div>
+
     <h4>Your Friends</h4>
     <div id="friendsList" class="list"></div>
   </section>
+
   <section id="rooms" class="panel">
     <div style="display:flex;gap:8px">
       <input id="roomName" placeholder="Room name">
       <button id="createRoomBtn" class="btn">Create Room</button>
     </div>
+
     <h4>Available Rooms</h4>
     <div id="roomsList" class="list"></div>
   </section>
+
   <section id="dms" class="panel">
     <h4>Direct Messages</h4>
     <div id="dmList" class="list"></div>
   </section>
 </main>
+
 <div id="chatOverlay" class="chat-overlay hidden" aria-hidden="true">
   <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;border-bottom:1px solid rgba(255,255,255,0.02)">
     <div id="chatTitle">Chat</div>
@@ -79,145 +101,395 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
       <button id="closeChat" class="btn secondary">Close</button>
     </div>
   </div>
+
   <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
+
   <div class="chat-input">
     <input id="chatInput" maxlength="300" placeholder="Type a message (Enter to send)">
     <button id="sendBtn" class="btn">Send</button>
   </div>
 </div>
+
 <script>
 (async function(){
-const socket = io();
-let me = null, myId = null, isAdmin = false, current = null, unreadDMs = new Set();
-const dmListDiv = document.getElementById('dmList');
-const chatOverlay = document.getElementById('chatOverlay');
-const chatTitle = document.getElementById('chatTitle');
-const chatMessages = document.getElementById('chatMessages');
-const chatInput = document.getElementById('chatInput');
-const sendBtn = document.getElementById('sendBtn');
-const closeChatBtn = document.getElementById('closeChat');
+  const socket = io();
+  let me = null, isAdmin = false;
+  let current = null; // { type:'dm'|'room', id: ... }
+  const unreadDMs = new Set();
+  const notifications = []; // {type, text, time}
 
-document.getElementById('accountBtn').onclick = ()=> location.href = '/account.html';
-document.getElementById('logoutBtn').onclick = async ()=> { await fetch('/logout',{method:'POST'}); location.href = '/login.html'; };
+  // DOM refs
+  const notifBtn = document.getElementById('notifBtn');
+  const notifPop = document.getElementById('notifPop');
+  const notifCount = document.getElementById('notifCount');
+  const dmListDiv = document.getElementById('dmList');
+  const recentUsersDiv = document.getElementById('recentUsers');
+  const friendRequestsDiv = document.getElementById('friendRequests');
+  const friendsListDiv = document.getElementById('friendsList');
+  const roomsListDiv = document.getElementById('roomsList');
 
-async function api(path, opts = {}) { try { const r = await fetch(path, opts); return await r.json(); } catch (e) { console.error('API error', path, e); return null; } }
+  const chatOverlay = document.getElementById('chatOverlay');
+  const chatTitle = document.getElementById('chatTitle');
+  const chatMessages = document.getElementById('chatMessages');
+  const chatInput = document.getElementById('chatInput');
+  const sendBtn = document.getElementById('sendBtn');
+  const closeChatBtn = document.getElementById('closeChat');
 
-async function init(){
-  const meRes = await api('/me');
-  if(!meRes || !meRes.loggedIn) return location.href = '/login.html';
-  me = meRes.username; myId = meRes.id; isAdmin = !!meRes.admin;
-  socket.emit('registerUser', me);
-  await loadDMList();
-}
+  // nav actions
+  document.getElementById('accountBtn').onclick = ()=> location.href = '/account.html';
+  document.getElementById('logoutBtn').onclick = async ()=> { await fetch('/logout',{method:'POST'}); location.href = '/login.html'; };
 
-async function loadDMList(){
-  const data = await api('/friends'); if(!data) return;
-  dmListDiv.innerHTML = '';
-  let friends = (data.friends||[]).map(f=>({...f, unread: unreadDMs.has(f.username)}));
-  friends.sort((a,b)=> (b.unread?1:0) - (a.unread?1:0));
-  friends.forEach(f=>{
-    const el = document.createElement('div');
-    el.className='list-item';
-    el.innerHTML = `<div style="display:flex;align-items:center;gap:8px">
-                      <img src="${f.avatar||'/avatars/default.png'}" class="pfp">
-                      <div>@ ${f.username}</div>
-                      ${f.unread?'<div class="unread-dot"></div>':''}
-                    </div>`;
-    el.onclick = ()=> openDM(f.username);
-    dmListDiv.appendChild(el);
-  });
-}
-
-async function openDM(username){
-  current={type:'dm',id:username};
-  chatTitle.textContent = `@ ${username}`;
-  chatMessages.innerHTML='';
-  const r = await api(`/dm/${username}`);
-  if(r && r.success) (r.messages||[]).forEach(m=>appendMessage(m));
-  chatOverlay.classList.remove('hidden');
-  chatOverlay.setAttribute('aria-hidden','false');
-  unreadDMs.delete(username);
-  loadDMList();
-}
-
-function appendMessage(m){
-  if(!m || !m.id) return;
-  const el = document.createElement('div');
-  el.className = 'chat-message' + (m.sender===me ? ' me' : '');
-  el.dataset.msgid = m.id;
-  const av = document.createElement('img'); av.src = m.avatar||'/avatars/default.png'; av.className='pfp';
-  const bubble = document.createElement('div'); bubble.className='bubble';
-  bubble.innerHTML = `
-    <div style="font-size:12px;color:var(--muted)">${m.sender} • ${new Date(m.time||Date.now()).toLocaleString()}</div>
-    <div style="margin-top:6px">${m.message}</div>
-  `;
-  if(m.sender===me || isAdmin){
-    const actions = document.createElement('div');
-    actions.className='actions';
-    actions.innerHTML = `<span data-act="reply">Reply</span> <span data-act="edit">Edit</span> <span data-act="delete">Delete</span>`;
-    actions.onclick = e=>{
-      if(e.target.dataset.act==='reply') chatInput.value = `@${m.sender} ${chatInput.value}`;
-      if(e.target.dataset.act==='edit') {
-        const newMsg = prompt('Edit your message:', m.message);
-        if(newMsg) socket.emit('editMessage',{id:m.id,newMsg});
-      }
-      if(e.target.dataset.act==='delete') {
-        if(confirm('Delete this message?')) socket.emit('deleteMessage',{id:m.id});
-      }
-    };
-    bubble.appendChild(actions);
-  }
-  el.appendChild(av); el.appendChild(bubble);
-  chatMessages.appendChild(el);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-}
-
-function sendMessage(){
-  const txt = chatInput.value.trim();
-  if(!txt) return;
-  if(!current) return;
-  if(current.type==='dm') {
-    const msg = {id:Date.now().toString(),sender:me,avatar:null,message:txt,time:Date.now(),to:current.id};
-    appendMessage(msg); // show instantly for sender
-    socket.emit('dmMessage',{to:current.id,message:txt});
-  }
-  chatInput.value='';
-}
-
-sendBtn.onclick = sendMessage;
-chatInput.addEventListener('keydown', e=>{ if(e.key==='Enter') sendMessage(); });
-
-socket.on('dmMessage', m => {
-  if(current?.type==='dm' && (current.id===m.sender || current.id===m.to)) {
-    appendMessage(m);
-  } else {
-    const other = m.sender===me ? m.to : m.sender;
-    unreadDMs.add(other);
-    loadDMList();
-  }
-});
-socket.on('editMessage', m=>{
-  const el = chatMessages.querySelector(`[data-msgid="${m.id}"] .bubble div:nth-child(2)`);
-  if(el) el.textContent = m.newMsg;
-});
-socket.on('deleteMessage', m=>{
-  const el = chatMessages.querySelector(`[data-msgid="${m.id}"]`);
-  if(el) el.remove();
-});
-
-closeChatBtn.onclick = ()=>{ chatOverlay.classList.add('hidden'); chatOverlay.setAttribute('aria-hidden','true'); current=null; };
-
-// tab logic
-document.querySelectorAll('.tab').forEach(tab=>{
-  tab.onclick=()=>{
-    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-    document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-    tab.classList.add('active');
-    document.getElementById(tab.dataset.tab).classList.add('active');
+  notifBtn.onclick = ()=> {
+    if(notifPop.classList.contains('visible')) { notifPop.classList.remove('visible'); return; }
+    renderNotifications();
+    notifPop.classList.add('visible');
+    notifCount.style.display = notifications.length ? 'block' : 'none';
   };
-});
 
-await init();
+  function pushNotification(obj){
+    notifications.unshift(obj);
+    notifCount.innerText = notifications.length;
+    notifCount.style.display = notifications.length ? 'block' : 'none';
+    // keep pop visible small
+    if(notifPop.classList.contains('visible')) renderNotifications();
+  }
+
+  function renderNotifications(){
+    notifPop.innerHTML = notifications.length ? notifications.map(n=>`<div style="padding:6px;border-bottom:1px solid rgba(255,255,255,0.02);"><div style="font-size:13px">${n.text}</div><div style="font-size:12px;color:var(--muted)">${new Date(n.time).toLocaleString()}</div></div>`).join('') : '<div style="padding:8px;color:var(--muted)">No notifications</div>';
+  }
+
+  // tab switching
+  document.querySelectorAll('.tab').forEach(tab=>{
+    tab.onclick=()=>{
+      document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById(tab.dataset.tab).classList.add('active');
+    };
+  });
+
+  // safe fetch
+  async function api(path, opts={}) {
+    try{
+      const r = await fetch(path, opts);
+      return await r.json();
+    }catch(e){ console.error('API error',path,e); return null; }
+  }
+
+  // init
+  async function init(){
+    const meRes = await api('/me');
+    if(!meRes || !meRes.loggedIn) return location.href = '/login.html';
+    me = meRes.username; isAdmin = !!meRes.admin;
+    socket.emit('registerUser', me);
+    await Promise.all([loadFriendsAndRecent(), loadRooms(), loadDMList()]);
+    socket.emit('fetchFriends');
+  }
+
+  // friends & recent
+  async function loadFriendsAndRecent(){
+    const data = await api('/friends'); if(!data) return;
+    // friend requests
+    friendRequestsDiv.innerHTML='';
+    (data.requests||[]).forEach(r=>{
+      const el = document.createElement('div'); el.className='list-item';
+      el.innerHTML = `<div>${escapeHtml(r)}</div><div><button class="btn secondary">Accept</button></div>`;
+      el.querySelector('button').onclick = async (e)=> {
+        e.stopPropagation();
+        await fetch('/accept-request',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ from: r })});
+        socket.emit('fetchFriends');
+        await loadFriendsAndRecent();
+        pushNotification({ type:'friend', text:`You accepted ${r}`, time: Date.now() });
+      };
+      friendRequestsDiv.appendChild(el);
+    });
+
+    // friends
+    friendsListDiv.innerHTML=''; const seen = new Set();
+    (data.friends||[]).forEach(f=>{
+      if(seen.has(f.username)) return; seen.add(f.username);
+      const el = document.createElement('div'); el.className='list-item';
+      el.innerHTML = `<div style="display:flex;align-items:center;gap:8px"><img src="${f.avatar||'/avatars/default.png'}" class="pfp"><div>${escapeHtml(f.username)}</div></div>`;
+      el.onclick = ()=> openDM(f.username);
+      friendsListDiv.appendChild(el);
+    });
+
+    // recent
+    recentUsersDiv.innerHTML='';
+    (data.recent||[]).forEach(u=>{
+      const el = document.createElement('div'); el.className='list-item';
+      el.innerHTML = `<div style="display:flex;align-items:center;gap:8px"><img src="${u.avatar||'/avatars/default.png'}" class="pfp"><div>${escapeHtml(u.username)}</div></div><div><button class="btn secondary">Add</button></div>`;
+      el.querySelector('button').onclick = async (e)=>{
+        e.stopPropagation();
+        const resp = await fetch('/friend-request',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ to: u.username })});
+        const j = await resp.json();
+        pushNotification({ type:'friend-request', text: j.success ? `Friend request sent to ${u.username}` : j.message||'Error', time: Date.now() });
+        await loadFriendsAndRecent();
+      };
+      recentUsersDiv.appendChild(el);
+    });
+  }
+
+  // rooms
+  async function loadRooms(){
+    const data = await api('/rooms'); if(!data) return;
+    roomsListDiv.innerHTML='';
+    Object.entries(data).forEach(([id,r])=>{
+      const el = document.createElement('div'); el.className='list-item';
+      el.innerHTML = `<div>${escapeHtml(r.name)}</div><div><button class="btn secondary">Join</button></div>`;
+      el.querySelector('button').onclick = ()=> openRoom(id, r.name);
+      roomsListDiv.appendChild(el);
+    });
+  }
+  document.getElementById('createRoomBtn').onclick = async ()=>{
+    const name = document.getElementById('roomName').value.trim();
+    if(!name) return alert('Enter a room name');
+    const res = await fetch('/create-room',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ name })});
+    const j = await res.json();
+    if(j.success){ await loadRooms(); openRoom(j.roomId, name); socket.emit('roomsUpdated'); pushNotification({type:'room', text:`Room created: ${name}`, time:Date.now()}); }
+    else alert(j.message || 'Create failed');
+  };
+
+  function openRoom(id, name){
+    current = { type:'room', id };
+    chatTitle.textContent = `# ${name}`;
+    chatMessages.innerHTML = '';
+    chatOverlay.classList.remove('hidden'); chatOverlay.setAttribute('aria-hidden','false');
+    socket.emit('joinRoom', { roomId: id });
+  }
+
+  // DM list
+  async function loadDMList(){
+    const data = await api('/friends'); if(!data) return;
+    dmListDiv.innerHTML='';
+    // annotate with unread
+    const friends = (data.friends||[]).map(f => ({ ...f, unread: unreadDMs.has(f.username) }));
+    friends.sort((a,b)=> (b.unread?1:0) - (a.unread?1:0));
+    friends.forEach(f=>{
+      const el = document.createElement('div'); el.className='list-item';
+      el.innerHTML = `<div style="display:flex;align-items:center;gap:8px">
+                        <img src="${f.avatar||'/avatars/default.png'}" class="pfp">
+                        <div>@ ${escapeHtml(f.username)}</div>
+                      </div>
+                      <div>${f.unread?'<div class="unread-dot"></div>':''}</div>`;
+      el.onclick = ()=> openDM(f.username);
+      dmListDiv.appendChild(el);
+    });
+  }
+
+  async function openDM(username){
+    current = { type:'dm', id: username };
+    chatTitle.textContent = `@ ${username}`;
+    chatMessages.innerHTML = '';
+    const r = await api(`/dm/${username}`);
+    if(r && r.success) (r.messages||[]).forEach(m => appendMessage(m));
+    chatOverlay.classList.remove('hidden'); chatOverlay.setAttribute('aria-hidden','false');
+    // clear unread
+    unreadDMs.delete(username);
+    await loadDMList();
+  }
+
+  // message display / optimistic send replacement
+  function createMessageElement(m, isTemp=false){
+    if(!m) return null;
+    const el = document.createElement('div');
+    el.className = 'chat-message' + (m.sender === me ? ' me' : '') + (isTemp ? ' temp' : '');
+    el.dataset.msgid = m.id || '';
+    const av = document.createElement('img'); av.className = 'pfp'; av.src = m.avatar || '/avatars/default.png';
+    const bubble = document.createElement('div'); bubble.className = 'bubble';
+    const meta = `<div style="font-size:12px;color:var(--muted)">${escapeHtml(m.sender)} • ${new Date(m.time||Date.now()).toLocaleString()}</div>`;
+    bubble.innerHTML = `${meta}<div style="margin-top:6px" class="msg-text">${escapeHtml(m.message||'')}</div>`;
+    // controls
+    if(m.sender === me || isAdmin){
+      const actions = document.createElement('div');
+      actions.className = 'actions';
+      actions.innerHTML = `<span data-act="reply">Reply</span> <span data-act="edit">Edit</span> <span data-act="delete">Delete</span>`;
+      actions.onclick = (e)=>{
+        const act = e.target.dataset.act;
+        if(act === 'reply') chatInput.value = '@' + m.sender + ' ' + chatInput.value;
+        if(act === 'edit'){
+          const newText = prompt('Edit message', m.message);
+          if(newText != null){
+            // send edit request: if DM, dmWith param
+            if(current?.type === 'dm') fetch('/edit-message',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ id:m.id, dmWith: current.id, newMsg: newText })});
+            else if(current?.type === 'room') fetch('/edit-message',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ id:m.id, roomId: current.id, newMsg: newText })});
+          }
+        }
+        if(act === 'delete'){
+          if(!confirm('Delete message?')) return;
+          if(current?.type === 'dm') fetch('/delete-message',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ id:m.id, dmWith: current.id })});
+          else if(current?.type === 'room') fetch('/delete-message',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ id:m.id, roomId: current.id })});
+        }
+      };
+      bubble.appendChild(actions);
+    }
+
+    el.appendChild(av); el.appendChild(bubble);
+    return el;
+  }
+
+  function appendMessage(m){
+    if(!m || !m.id) return;
+    // prevent duplicate by id
+    if(chatMessages.querySelector(`[data-msgid="${m.id}"]`)) return;
+
+    // try to replace a temp message (optimistic)
+    const temps = Array.from(chatMessages.querySelectorAll('.chat-message.temp'));
+    for(const t of temps){
+      const txtNode = t.querySelector('.msg-text');
+      if(!txtNode) continue;
+      const displayed = txtNode.innerText;
+      if(displayed === (m.message||'') && t.classList.contains(m.sender === me ? 'me' : '')){
+        t.dataset.msgid = m.id;
+        t.classList.remove('temp');
+        // update meta and avatar/message
+        const bubble = t.querySelector('.bubble');
+        if(bubble){
+          bubble.querySelector('div').innerText = `${m.sender} • ${new Date(m.time||Date.now()).toLocaleString()}`;
+          const msgDiv = bubble.querySelector('.msg-text');
+          if(msgDiv) msgDiv.innerText = m.message || '';
+        }
+        const img = t.querySelector('img.pfp');
+        if(img && m.avatar) img.src = m.avatar;
+        t.classList.remove('temp');
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        return;
+      }
+    }
+
+    // otherwise append normally
+    const node = createMessageElement(m, false);
+    if(node){
+      chatMessages.appendChild(node);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+  }
+
+  function appendTempMessage(m){
+    const node = createMessageElement(m, true);
+    if(node){
+      chatMessages.appendChild(node);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+  }
+
+  // send message
+  sendBtn.onclick = sendMessage;
+  chatInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') sendMessage(); });
+
+  function sendMessage(){
+    const txt = chatInput.value.trim();
+    if(!txt) return;
+    if(!current) return alert('Open a room or DM first');
+    if(txt.length > 300) return alert('Message length max 300');
+    // optimistic id
+    const tempId = 'temp-' + Date.now() + '-' + Math.floor(Math.random()*9999);
+    const tempMsg = {
+      id: tempId,
+      sender: me,
+      avatar: null,
+      message: txt,
+      time: Date.now(),
+      to: current.type === 'dm' ? current.id : undefined,
+      roomId: current.type === 'room' ? current.id : undefined
+    };
+    appendTempMessage(tempMsg);
+
+    // emit
+    if(current.type === 'room') socket.emit('roomMessage', { roomId: current.id, message: txt });
+    else socket.emit('dmMessage', { to: current.id, message: txt });
+
+    chatInput.value = '';
+  }
+
+  // socket handlers
+  socket.on('chatHistory', msgs => {
+    chatMessages.innerHTML = '';
+    (msgs||[]).forEach(m => appendMessage(m));
+  });
+
+  socket.on('roomMessage', m => {
+    if(current?.type === 'room' && current.id === m.roomId) appendMessage(m);
+  });
+
+  socket.on('dmMessage', m => {
+    // if this DM is open and matches partner => append; else mark unread & push notification
+    if(current?.type === 'dm' && (current.id === m.sender || current.id === (m.to || null))) {
+      appendMessage(m);
+    } else {
+      const other = (m.sender === me ? (m.to || '') : m.sender);
+      if(other) unreadDMs.add(other);
+      awaitLoadDMList();
+      pushNotification({ type:'dm', text: `New DM from ${m.sender}`, time: Date.now() });
+    }
+  });
+
+  socket.on('dmNotification', ({ from }) => {
+    // fired for receiver; add to inbox
+    pushNotification({ type:'dm', text: `New DM from ${from}`, time: Date.now() });
+  });
+
+  socket.on('friendRequest', from => {
+    pushNotification({ type:'friend-request', text: `Friend request from ${from}`, time: Date.now() });
+    // refresh lists
+    awaitLoadFriends();
+  });
+
+  socket.on('friendsUpdate', ()=> {
+    awaitLoadFriends();
+    awaitLoadDMList();
+  });
+
+  socket.on('roomsUpdated', ()=> loadRooms());
+
+  socket.on('updateMessage', msg => {
+    // update message in DOM if present
+    const el = chatMessages.querySelector(`[data-msgid="${msg.id}"]`);
+    if(el){
+      const textNode = el.querySelector('.msg-text');
+      if(textNode) textNode.innerText = msg.message || '';
+    }
+  });
+
+  socket.on('deleteMessage', id => {
+    const el = chatMessages.querySelector(`[data-msgid="${id}"]`);
+    if(el) el.remove();
+  });
+
+  // helpers to throttle repeated loads to avoid too many requests
+  let friendsLoadTimer = 0;
+  function awaitLoadFriends(){
+    if(friendsLoadTimer) clearTimeout(friendsLoadTimer);
+    friendsLoadTimer = setTimeout(()=> loadFriendsAndRecent(), 100);
+  }
+  let dmLoadTimer = 0;
+  function awaitLoadDMList(){
+    if(dmLoadTimer) clearTimeout(dmLoadTimer);
+    dmLoadTimer = setTimeout(()=> loadDMList(), 100);
+  }
+
+  // search friend/user
+  document.getElementById('searchBtn').onclick = async ()=>{
+    const q = document.getElementById('searchUser').value.trim();
+    if(!q) return alert('Enter username');
+    recentUsersDiv.innerHTML = '';
+    const el = document.createElement('div'); el.className='list-item';
+    el.innerHTML = `<div>${escapeHtml(q)}</div><div><button class="btn secondary">Add</button></div>`;
+    el.querySelector('button').onclick = async ()=> {
+      const resp = await fetch('/friend-request',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ to: q })});
+      const j = await resp.json();
+      pushNotification({ type:'friend-request', text: j.success ? `Friend request sent to ${q}` : j.message || 'Error', time: Date.now() });
+      awaitLoadFriends();
+    };
+    recentUsersDiv.appendChild(el);
+  };
+
+  // utility
+  function escapeHtml(s){ return (s||'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  // initial load
+  await init();
+
 })();
 </script>
 </body>
