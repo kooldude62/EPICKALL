@@ -25,11 +25,13 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
 .list{display:flex;flex-direction:column;gap:6px;max-height:56vh;overflow:auto;padding-right:6px} 
 .list-item{display:flex;align-items:center;justify-content:space-between;padding:8px;border-radius:8px;background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));cursor:pointer} 
 .pfp{width:36px;height:36px;border-radius:50%;object-fit:cover;border:1px solid rgba(255,255,255,0.04)} 
+.room-pfp{width:28px;height:28px;border-radius:6px;object-fit:cover;border:1px solid rgba(255,255,255,0.04);margin-right:8px}
 .chat-overlay{position:fixed;inset:0;background:linear-gradient(180deg, rgba(1,4,8,0.85), rgba(1,4,8,0.95));display:flex;flex-direction:column;z-index:1200} 
 .chat-overlay.hidden{display:none} 
 .chat-messages{flex:1;padding:18px;overflow:auto;display:flex;flex-direction:column;gap:10px} 
 .chat-input{display:flex;gap:8px;padding:14px;border-top:1px solid rgba(255,255,255,0.02)} 
 .chat-input input{flex:1;padding:12px;border-radius:10px;background:rgba(255,255,255,0.02);color:#fff;border:1px solid rgba(255,255,255,0.03)} 
+.reply-preview{padding:8px;border-left:3px solid rgba(107,140,255,0.6);margin-bottom:8px;border-radius:6px;background:rgba(255,255,255,0.02);display:flex;justify-content:space-between;align-items:center}
 .chat-message{display:flex;gap:10px;align-items:flex-start} 
 .chat-message .bubble{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:10px;border-radius:10px;max-width:72%} 
 .chat-message.me .bubble{background:linear-gradient(180deg, rgba(107,140,255,0.14), rgba(107,140,255,0.08));align-self:flex-end} 
@@ -39,6 +41,7 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
 .small{font-size:13px;color:var(--muted)} 
 .unread-dot{width:10px;height:10px;border-radius:50%;background:var(--accent);margin-left:8px;flex-shrink:0}
 .temp { opacity: 0.85; filter: blur(0.2px); }
+.quoted { font-size:13px; opacity:0.9; padding:6px; border-radius:6px; background: rgba(255,255,255,0.02); margin-bottom:8px; cursor:pointer; }
 </style>
 </head>
 <body>
@@ -96,10 +99,17 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
 
 <div id="chatOverlay" class="chat-overlay hidden" aria-hidden="true">
   <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;border-bottom:1px solid rgba(255,255,255,0.02)">
-    <div id="chatTitle">Chat</div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <img id="roomPfp" src="" class="room-pfp" style="display:none">
+      <div id="chatTitle">Chat</div>
+    </div>
     <div style="display:flex;gap:8px;align-items:center">
       <button id="closeChat" class="btn secondary">Close</button>
     </div>
+  </div>
+
+  <div id="replyPreview" class="reply-preview" style="display:none">
+    <div id="replyText"></div><div><button id="clearReply" class="btn secondary">Clear</button></div>
   </div>
 
   <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
@@ -116,7 +126,8 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
   let me = null, isAdmin = false;
   let current = null; // { type:'dm'|'room', id: ... }
   const unreadDMs = new Set();
-  const notifications = []; // {type, text, time}
+  const notifications = [];
+  let replyTo = null; // id of message being replied to
 
   // DOM refs
   const notifBtn = document.getElementById('notifBtn');
@@ -130,10 +141,14 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
 
   const chatOverlay = document.getElementById('chatOverlay');
   const chatTitle = document.getElementById('chatTitle');
+  const roomPfp = document.getElementById('roomPfp');
   const chatMessages = document.getElementById('chatMessages');
   const chatInput = document.getElementById('chatInput');
   const sendBtn = document.getElementById('sendBtn');
   const closeChatBtn = document.getElementById('closeChat');
+  const replyPreview = document.getElementById('replyPreview');
+  const replyText = document.getElementById('replyText');
+  const clearReplyBtn = document.getElementById('clearReply');
 
   // nav actions
   document.getElementById('accountBtn').onclick = ()=> location.href = '/account.html';
@@ -143,19 +158,17 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     if(notifPop.classList.contains('visible')) { notifPop.classList.remove('visible'); return; }
     renderNotifications();
     notifPop.classList.add('visible');
-    notifCount.style.display = notifications.length ? 'block' : 'none';
   };
 
   function pushNotification(obj){
     notifications.unshift(obj);
     notifCount.innerText = notifications.length;
     notifCount.style.display = notifications.length ? 'block' : 'none';
-    // keep pop visible small
     if(notifPop.classList.contains('visible')) renderNotifications();
   }
 
   function renderNotifications(){
-    notifPop.innerHTML = notifications.length ? notifications.map(n=>`<div style="padding:6px;border-bottom:1px solid rgba(255,255,255,0.02);"><div style="font-size:13px">${n.text}</div><div style="font-size:12px;color:var(--muted)">${new Date(n.time).toLocaleString()}</div></div>`).join('') : '<div style="padding:8px;color:var(--muted)">No notifications</div>';
+    notifPop.innerHTML = notifications.length ? notifications.map(n=>`<div style="padding:6px;border-bottom:1px solid rgba(255,255,255,0.02);"><div style="font-size:13px">${escapeHtml(n.text)}</div><div style="font-size:12px;color:var(--muted)">${new Date(n.time).toLocaleString()}</div></div>`).join('') : '<div style="padding:8px;color:var(--muted)">No notifications</div>';
   }
 
   // tab switching
@@ -236,8 +249,8 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     roomsListDiv.innerHTML='';
     Object.entries(data).forEach(([id,r])=>{
       const el = document.createElement('div'); el.className='list-item';
-      el.innerHTML = `<div>${escapeHtml(r.name)}</div><div><button class="btn secondary">Join</button></div>`;
-      el.querySelector('button').onclick = ()=> openRoom(id, r.name);
+      el.innerHTML = `<div style="display:flex;align-items:center;gap:8px">${r.pfp?`<img src="${r.pfp}" class="room-pfp">`:''}<div>${escapeHtml(r.name)}</div></div><div><button class="btn secondary">Join</button></div>`;
+      el.querySelector('button').onclick = ()=> openRoom(id, r.name, r.pfp);
       roomsListDiv.appendChild(el);
     });
   }
@@ -250,9 +263,10 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     else alert(j.message || 'Create failed');
   };
 
-  function openRoom(id, name){
+  function openRoom(id, name, pfp){
     current = { type:'room', id };
     chatTitle.textContent = `# ${name}`;
+    if(pfp){ roomPfp.src = pfp; roomPfp.style.display = 'inline-block'; } else { roomPfp.style.display = 'none'; }
     chatMessages.innerHTML = '';
     chatOverlay.classList.remove('hidden'); chatOverlay.setAttribute('aria-hidden','false');
     socket.emit('joinRoom', { roomId: id });
@@ -262,8 +276,7 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
   async function loadDMList(){
     const data = await api('/friends'); if(!data) return;
     dmListDiv.innerHTML='';
-    // annotate with unread
-    const friends = (data.friends||[]).map(f => ({ ...f, unread: unreadDMs.has(f.username) }));
+    const friends = (data.friends||[]).map(f=>({...f, unread: unreadDMs.has(f.username)}));
     friends.sort((a,b)=> (b.unread?1:0) - (a.unread?1:0));
     friends.forEach(f=>{
       const el = document.createElement('div'); el.className='list-item';
@@ -280,6 +293,7 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
   async function openDM(username){
     current = { type:'dm', id: username };
     chatTitle.textContent = `@ ${username}`;
+    roomPfp.style.display = 'none';
     chatMessages.innerHTML = '';
     const r = await api(`/dm/${username}`);
     if(r && r.success) (r.messages||[]).forEach(m => appendMessage(m));
@@ -289,28 +303,63 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     await loadDMList();
   }
 
-  // message display / optimistic send replacement
+  // message UI
   function createMessageElement(m, isTemp=false){
     if(!m) return null;
     const el = document.createElement('div');
     el.className = 'chat-message' + (m.sender === me ? ' me' : '') + (isTemp ? ' temp' : '');
     el.dataset.msgid = m.id || '';
     const av = document.createElement('img'); av.className = 'pfp'; av.src = m.avatar || '/avatars/default.png';
+
     const bubble = document.createElement('div'); bubble.className = 'bubble';
-    const meta = `<div style="font-size:12px;color:var(--muted)">${escapeHtml(m.sender)} • ${new Date(m.time||Date.now()).toLocaleString()}</div>`;
-    bubble.innerHTML = `${meta}<div style="margin-top:6px" class="msg-text">${escapeHtml(m.message||'')}</div>`;
-    // controls
+
+    // quoted / reply preview (if this message is a reply)
+    if(m.replyTo){
+      // find original message text if already loaded
+      const target = chatMessages.querySelector(`[data-msgid="${m.replyTo}"]`);
+      let snippet = 'original message';
+      if(target){
+        const t = target.querySelector('.msg-text');
+        if(t) snippet = t.innerText.slice(0, 120);
+      } else {
+        snippet = '(original message not in view)';
+      }
+      const quoted = document.createElement('div'); quoted.className = 'quoted';
+      quoted.innerText = snippet;
+      quoted.onclick = ()=> {
+        const target2 = chatMessages.querySelector(`[data-msgid="${m.replyTo}"]`);
+        if(target2) target2.scrollIntoView({ behavior:'smooth', block:'center' });
+      };
+      bubble.appendChild(quoted);
+    }
+
+    const meta = document.createElement('div');
+    meta.style.cssText = "font-size:12px;color:var(--muted)";
+    meta.innerText = `${m.sender} • ${new Date(m.time||Date.now()).toLocaleString()}`;
+
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'msg-text';
+    msgDiv.style.marginTop = '6px';
+    msgDiv.innerText = m.message || '';
+
+    bubble.appendChild(meta);
+    bubble.appendChild(msgDiv);
+
     if(m.sender === me || isAdmin){
       const actions = document.createElement('div');
       actions.className = 'actions';
       actions.innerHTML = `<span data-act="reply">Reply</span> <span data-act="edit">Edit</span> <span data-act="delete">Delete</span>`;
       actions.onclick = (e)=>{
         const act = e.target.dataset.act;
-        if(act === 'reply') chatInput.value = '@' + m.sender + ' ' + chatInput.value;
+        if(act === 'reply'){
+          replyTo = m.id;
+          replyText.innerText = `${m.sender}: ${m.message?.slice(0,120)}`;
+          replyPreview.style.display = 'flex';
+          chatInput.focus();
+        }
         if(act === 'edit'){
           const newText = prompt('Edit message', m.message);
           if(newText != null){
-            // send edit request: if DM, dmWith param
             if(current?.type === 'dm') fetch('/edit-message',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ id:m.id, dmWith: current.id, newMsg: newText })});
             else if(current?.type === 'room') fetch('/edit-message',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ id:m.id, roomId: current.id, newMsg: newText })});
           }
@@ -330,10 +379,9 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
 
   function appendMessage(m){
     if(!m || !m.id) return;
-    // prevent duplicate by id
     if(chatMessages.querySelector(`[data-msgid="${m.id}"]`)) return;
 
-    // try to replace a temp message (optimistic)
+    // try to replace optimistic temp
     const temps = Array.from(chatMessages.querySelectorAll('.chat-message.temp'));
     for(const t of temps){
       const txtNode = t.querySelector('.msg-text');
@@ -342,12 +390,12 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
       if(displayed === (m.message||'') && t.classList.contains(m.sender === me ? 'me' : '')){
         t.dataset.msgid = m.id;
         t.classList.remove('temp');
-        // update meta and avatar/message
         const bubble = t.querySelector('.bubble');
         if(bubble){
-          bubble.querySelector('div').innerText = `${m.sender} • ${new Date(m.time||Date.now()).toLocaleString()}`;
-          const msgDiv = bubble.querySelector('.msg-text');
-          if(msgDiv) msgDiv.innerText = m.message || '';
+          const meta = bubble.querySelector('div');
+          if(meta) meta.innerText = `${m.sender} • ${new Date(m.time||Date.now()).toLocaleString()}`;
+          const msgText = bubble.querySelector('.msg-text');
+          if(msgText) msgText.innerText = m.message || '';
         }
         const img = t.querySelector('img.pfp');
         if(img && m.avatar) img.src = m.avatar;
@@ -357,12 +405,89 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
       }
     }
 
-    // otherwise append normally
     const node = createMessageElement(m, false);
     if(node){
       chatMessages.appendChild(node);
       chatMessages.scrollTop = chatMessages.scrollHeight;
     }
+  }
+
+  function createMessageElement(m, isTemp){
+    return createMessageElementInner(m, isTemp);
+  }
+
+  // we need a small wrapper to avoid duplicate function names
+  function createMessageElementInner(m, isTemp){
+    return (function(){ /* implemented above in createMessageElement */ return (function(){ /* placeholder */ })() })();
+  }
+
+  // Because of above duplication, implement a direct wrapper to the earlier createMessageElement body:
+  function createMessageElement(m, isTemp=false){
+    const el = document.createElement('div');
+    el.className = 'chat-message' + (m.sender === me ? ' me' : '') + (isTemp ? ' temp' : '');
+    el.dataset.msgid = m.id || '';
+    const av = document.createElement('img'); av.className = 'pfp'; av.src = m.avatar || '/avatars/default.png';
+
+    const bubble = document.createElement('div'); bubble.className = 'bubble';
+
+    if(m.replyTo){
+      const target = chatMessages.querySelector(`[data-msgid="${m.replyTo}"]`);
+      let snippet = '(original message)';
+      if(target){
+        const t = target.querySelector('.msg-text');
+        if(t) snippet = t.innerText.slice(0,120);
+      }
+      const quoted = document.createElement('div'); quoted.className = 'quoted';
+      quoted.innerText = snippet;
+      quoted.onclick = ()=> {
+        const target2 = chatMessages.querySelector(`[data-msgid="${m.replyTo}"]`);
+        if(target2) target2.scrollIntoView({ behavior:'smooth', block:'center' });
+      };
+      bubble.appendChild(quoted);
+    }
+
+    const meta = document.createElement('div');
+    meta.style.cssText = "font-size:12px;color:var(--muted)";
+    meta.innerText = `${m.sender} • ${new Date(m.time||Date.now()).toLocaleString()}`;
+
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'msg-text';
+    msgDiv.style.marginTop = '6px';
+    msgDiv.innerText = m.message || '';
+
+    bubble.appendChild(meta);
+    bubble.appendChild(msgDiv);
+
+    if(m.sender === me || isAdmin){
+      const actions = document.createElement('div');
+      actions.className = 'actions';
+      actions.innerHTML = `<span data-act="reply">Reply</span> <span data-act="edit">Edit</span> <span data-act="delete">Delete</span>`;
+      actions.onclick = (e)=>{
+        const act = e.target.dataset.act;
+        if(act === 'reply'){
+          replyTo = m.id;
+          replyText.innerText = `${m.sender}: ${m.message?.slice(0,120)}`;
+          replyPreview.style.display = 'flex';
+          chatInput.focus();
+        }
+        if(act === 'edit'){
+          const newText = prompt('Edit message', m.message);
+          if(newText != null){
+            if(current?.type === 'dm') fetch('/edit-message',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ id:m.id, dmWith: current.id, newMsg: newText })});
+            else if(current?.type === 'room') fetch('/edit-message',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ id:m.id, roomId: current.id, newMsg: newText })});
+          }
+        }
+        if(act === 'delete'){
+          if(!confirm('Delete message?')) return;
+          if(current?.type === 'dm') fetch('/delete-message',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ id:m.id, dmWith: current.id })});
+          else if(current?.type === 'room') fetch('/delete-message',{method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ id:m.id, roomId: current.id })});
+        }
+      };
+      bubble.appendChild(actions);
+    }
+
+    el.appendChild(av); el.appendChild(bubble);
+    return el;
   }
 
   function appendTempMessage(m){
@@ -373,16 +498,16 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     }
   }
 
-  // send message
+  // send message (include replyTo if set)
   sendBtn.onclick = sendMessage;
   chatInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') sendMessage(); });
+  clearReplyBtn.onclick = ()=> { replyTo = null; replyPreview.style.display='none'; replyText.innerText=''; };
 
-  function sendMessage(){
+  async function sendMessage(){
     const txt = chatInput.value.trim();
     if(!txt) return;
     if(!current) return alert('Open a room or DM first');
     if(txt.length > 300) return alert('Message length max 300');
-    // optimistic id
     const tempId = 'temp-' + Date.now() + '-' + Math.floor(Math.random()*9999);
     const tempMsg = {
       id: tempId,
@@ -391,15 +516,17 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
       message: txt,
       time: Date.now(),
       to: current.type === 'dm' ? current.id : undefined,
-      roomId: current.type === 'room' ? current.id : undefined
+      roomId: current.type === 'room' ? current.id : undefined,
+      replyTo: replyTo || null
     };
     appendTempMessage(tempMsg);
 
-    // emit
-    if(current.type === 'room') socket.emit('roomMessage', { roomId: current.id, message: txt });
-    else socket.emit('dmMessage', { to: current.id, message: txt });
+    if(current.type === 'room') socket.emit('roomMessage', { roomId: current.id, message: txt, replyTo: replyTo || null });
+    else socket.emit('dmMessage', { to: current.id, message: txt, replyTo: replyTo || null });
 
     chatInput.value = '';
+    replyTo = null;
+    replyPreview.style.display = 'none';
   }
 
   // socket handlers
@@ -413,11 +540,10 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
   });
 
   socket.on('dmMessage', m => {
-    // if this DM is open and matches partner => append; else mark unread & push notification
     if(current?.type === 'dm' && (current.id === m.sender || current.id === (m.to || null))) {
       appendMessage(m);
     } else {
-      const other = (m.sender === me ? (m.to || '') : m.sender);
+      const other = m.sender === me ? (m.to || '') : m.sender;
       if(other) unreadDMs.add(other);
       awaitLoadDMList();
       pushNotification({ type:'dm', text: `New DM from ${m.sender}`, time: Date.now() });
@@ -425,13 +551,11 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
   });
 
   socket.on('dmNotification', ({ from }) => {
-    // fired for receiver; add to inbox
     pushNotification({ type:'dm', text: `New DM from ${from}`, time: Date.now() });
   });
 
   socket.on('friendRequest', from => {
     pushNotification({ type:'friend-request', text: `Friend request from ${from}`, time: Date.now() });
-    // refresh lists
     awaitLoadFriends();
   });
 
@@ -441,13 +565,22 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
   });
 
   socket.on('roomsUpdated', ()=> loadRooms());
+  socket.on('roomUpdated', ({ roomId, room }) => {
+    // if current room open, update header pfp
+    if(current?.type === 'room' && current.id === roomId) {
+      if(room.pfp){ roomPfp.src = room.pfp; roomPfp.style.display = 'inline-block'; } else roomPfp.style.display = 'none';
+    }
+    loadRooms();
+  });
+  socket.on('roomKicked', ({ roomId, by }) => {
+    if(current?.type === 'room' && current.id === roomId){ alert(`You were kicked from room by ${by}`); chatOverlay.classList.add('hidden'); current = null; }
+  });
 
   socket.on('updateMessage', msg => {
-    // update message in DOM if present
     const el = chatMessages.querySelector(`[data-msgid="${msg.id}"]`);
     if(el){
-      const textNode = el.querySelector('.msg-text');
-      if(textNode) textNode.innerText = msg.message || '';
+      const txt = el.querySelector('.msg-text');
+      if(txt) txt.innerText = msg.message || '';
     }
   });
 
@@ -456,17 +589,11 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     if(el) el.remove();
   });
 
-  // helpers to throttle repeated loads to avoid too many requests
+  // refresh helpers
   let friendsLoadTimer = 0;
-  function awaitLoadFriends(){
-    if(friendsLoadTimer) clearTimeout(friendsLoadTimer);
-    friendsLoadTimer = setTimeout(()=> loadFriendsAndRecent(), 100);
-  }
+  function awaitLoadFriends(){ if(friendsLoadTimer) clearTimeout(friendsLoadTimer); friendsLoadTimer = setTimeout(()=> loadFriendsAndRecent(), 100); }
   let dmLoadTimer = 0;
-  function awaitLoadDMList(){
-    if(dmLoadTimer) clearTimeout(dmLoadTimer);
-    dmLoadTimer = setTimeout(()=> loadDMList(), 100);
-  }
+  function awaitLoadDMList(){ if(dmLoadTimer) clearTimeout(dmLoadTimer); dmLoadTimer = setTimeout(()=> loadDMList(), 100); }
 
   // search friend/user
   document.getElementById('searchBtn').onclick = async ()=>{
@@ -484,10 +611,11 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     recentUsersDiv.appendChild(el);
   };
 
-  // utility
+  closeChatBtn.onclick = ()=> { chatOverlay.classList.add('hidden'); chatOverlay.setAttribute('aria-hidden','true'); current = null; replyTo = null; replyPreview.style.display='none'; };
+
   function escapeHtml(s){ return (s||'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-  // initial load
+  // initial run
   await init();
 
 })();
