@@ -1,4 +1,3 @@
-// server.js
 import express from "express";
 import session from "express-session";
 import bodyParser from "body-parser";
@@ -16,8 +15,17 @@ const __dirname = path.dirname(__filename);
 
 const DATA_FILE = path.join(__dirname, "data.json");
 const AVATAR_DIR = path.join(__dirname, "public", "avatars");
+const ROOM_PFP_DIR = path.join(__dirname, "public", "room_pfps");
 
 if (!fs.existsSync(AVATAR_DIR)) fs.mkdirSync(AVATAR_DIR, { recursive: true });
+if (!fs.existsSync(ROOM_PFP_DIR)) fs.mkdirSync(ROOM_PFP_DIR, { recursive: true });
+
+// tiny default png (1x1 transparent) used if not present
+const tinyPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=";
+const defaultAvatarPath = path.join(AVATAR_DIR, "default.png");
+const defaultRoomPfpPath = path.join(ROOM_PFP_DIR, "default.png");
+if (!fs.existsSync(defaultAvatarPath)) fs.writeFileSync(defaultAvatarPath, Buffer.from(tinyPNGBase64, "base64"));
+if (!fs.existsSync(defaultRoomPfpPath)) fs.writeFileSync(defaultRoomPfpPath, Buffer.from(tinyPNGBase64, "base64"));
 
 // load / save helpers
 function loadData() {
@@ -40,6 +48,13 @@ function saveData() {
 }
 
 const store = loadData();
+
+// ensure older data has defaults
+for (const rId of Object.keys(store.rooms || {})) {
+  store.rooms[rId].pfp = store.rooms[rId].pfp || "/room_pfps/default.png";
+  store.rooms[rId].owner = store.rooms[rId].owner || null;
+}
+
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer);
@@ -56,26 +71,16 @@ app.use(
 );
 app.use(express.static(path.join(__dirname, "public")));
 
+// multer for avatar uploads
 const upload = multer({ dest: path.join(__dirname, "tmp_uploads") });
 
 function genId() {
-  return crypto.randomBytes(6).toString("hex");
+  return crypto.randomBytes(5).toString("hex");
 }
 
 function requireAuth(req, res, next) {
   if (!req.session.user) return res.status(401).json({ loggedIn: false });
   next();
-}
-
-// Ensure default avatar exists so client doesn't 404
-const defaultAvatarPath = path.join(AVATAR_DIR, "default.png");
-if (!fs.existsSync(defaultAvatarPath)) {
-  // tiny transparent PNG
-  const emptyPNG = Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=",
-    "base64"
-  );
-  try { fs.writeFileSync(defaultAvatarPath, emptyPNG); } catch (e) {}
 }
 
 // --- AUTH ---
@@ -126,10 +131,11 @@ app.get("/me", (req, res) => {
   });
 });
 
-// --- AVATAR / ROOM PFP ---
+// --- AVATAR ---
 app.post("/update-avatar", requireAuth, upload.single("avatar"), (req, res) => {
   const username = req.session.user;
   let avatarUrl = null;
+
   if (req.file) {
     const ext = path.extname(req.file.originalname) || ".png";
     const destName = `${username}_${Date.now()}${ext}`;
@@ -138,28 +144,19 @@ app.post("/update-avatar", requireAuth, upload.single("avatar"), (req, res) => {
       fs.renameSync(req.file.path, destPath);
       avatarUrl = `/avatars/${destName}`;
     } catch (e) {
+      console.error(e);
+      try { fs.unlinkSync(req.file.path); } catch {}
       return res.json({ success: false, message: "Upload failed" });
     }
-  } else if (req.body.avatarUrl) avatarUrl = req.body.avatarUrl;
-  else return res.json({ success: false, message: "No avatar provided" });
+  } else if (req.body.avatarUrl) {
+    avatarUrl = req.body.avatarUrl;
+  } else {
+    return res.json({ success: false, message: "No avatar provided" });
+  }
 
   store.users[username].avatar = avatarUrl;
   saveData();
-  res.json({ success: true, avatar: avatarUrl });
-});
-
-// Set room PFP (owner or admin)
-app.post("/room-set-pfp", requireAuth, (req, res) => {
-  const username = req.session.user;
-  const { roomId, pfp } = req.body;
-  if (!roomId || !store.rooms[roomId]) return res.json({ success: false, message: "Room not found" });
-  const room = store.rooms[roomId];
-  if (room.owner !== username && !store.users[username].admin)
-    return res.json({ success: false, message: "Not permitted" });
-  room.pfp = pfp || null;
-  saveData();
-  io.emit("roomUpdated", { roomId, room });
-  res.json({ success: true, room });
+  return res.json({ success: true, avatar: avatarUrl });
 });
 
 // --- FRIENDS ---
@@ -167,21 +164,20 @@ app.get("/friends", requireAuth, (req, res) => {
   const username = req.session.user;
   const requests = store.friendRequests[username] || [];
   store.users[username].friends = Array.from(new Set(store.users[username].friends || []));
-  const friends = (store.users[username].friends || []).map((f) => ({
+  const friends = (store.users[username].friends || []).map(f => ({
     username: f,
     avatar: store.users[f]?.avatar || "/avatars/default.png",
   }));
   const recent = Object.values(store.users)
-    .filter((u) => u.username !== username && !store.users[username].friends.includes(u.username))
+    .filter(u => u.username !== username && !store.users[username].friends.includes(u.username))
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, 10)
-    .map((u) => ({ username: u.username, avatar: u.avatar || "/avatars/default.png" }));
+    .map(u => ({ username: u.username, avatar: u.avatar || "/avatars/default.png" }));
   res.json({ requests, friends, recent });
 });
 
 app.post("/friend-request", requireAuth, (req, res) => {
-  const from = req.session.user;
-  const to = req.body.to;
+  const from = req.session.user, to = req.body.to;
   if (!to || !store.users[to]) return res.json({ success: false, message: "User not found" });
   if (to === from) return res.json({ success: false, message: "Can't friend yourself" });
   store.friendRequests[to] = store.friendRequests[to] || [];
@@ -194,8 +190,7 @@ app.post("/friend-request", requireAuth, (req, res) => {
 });
 
 app.post("/accept-request", requireAuth, (req, res) => {
-  const username = req.session.user;
-  const from = req.body.from;
+  const username = req.session.user, from = req.body.from;
   store.friendRequests[username] = store.friendRequests[username] || [];
   const idx = store.friendRequests[username].indexOf(from);
   if (idx > -1) {
@@ -213,7 +208,12 @@ app.post("/accept-request", requireAuth, (req, res) => {
 app.get("/rooms", requireAuth, (req, res) => {
   const result = {};
   for (const [id, r] of Object.entries(store.rooms)) {
-    result[id] = { name: r.name, inviteOnly: !!r.inviteOnly, owner: r.owner, pfp: r.pfp || null };
+    result[id] = {
+      name: r.name,
+      inviteOnly: !!r.inviteOnly,
+      owner: r.owner || null,
+      pfp: r.pfp || "/room_pfps/default.png",
+    };
   }
   res.json(result);
 });
@@ -221,9 +221,13 @@ app.get("/rooms", requireAuth, (req, res) => {
 app.post("/create-room", requireAuth, (req, res) => {
   const { name, password, inviteOnly } = req.body;
   if (!name?.trim()) return res.json({ success: false, message: "Room name required" });
+
   const lower = name.trim().toLowerCase();
-  for (const r of Object.values(store.rooms)) if (r.name?.trim().toLowerCase() === lower)
-    return res.json({ success: false, message: "Room name already in use" });
+  for (const r of Object.values(store.rooms)) {
+    if (r.name?.trim().toLowerCase() === lower) {
+      return res.json({ success: false, message: "Room name already in use" });
+    }
+  }
 
   const id = genId();
   store.rooms[id] = {
@@ -233,7 +237,7 @@ app.post("/create-room", requireAuth, (req, res) => {
     users: [],
     messages: [],
     owner: req.session.user,
-    pfp: null
+    pfp: "/room_pfps/default.png",
   };
   saveData();
   io.emit("roomsUpdated");
@@ -243,7 +247,7 @@ app.post("/create-room", requireAuth, (req, res) => {
 app.get("/room-info/:roomId", requireAuth, (req, res) => {
   const r = store.rooms[req.params.roomId];
   if (!r) return res.json({ success: false });
-  res.json({ success: true, name: r.name, owner: r.owner, pfp: r.pfp || null });
+  res.json({ success: true, name: r.name, owner: r.owner || null, pfp: r.pfp || "/room_pfps/default.png" });
 });
 
 // --- DMs ---
@@ -254,76 +258,109 @@ app.get("/dm/:friend", requireAuth, (req, res) => {
   res.json({ success: true, messages: store.dms[key] || [] });
 });
 
-// --- Editing / Deleting ---
-app.post("/edit-message", requireAuth, (req, res) => {
+// --- Update Room PFP ---
+// accepts multipart/form-data with field 'pfp' and 'roomId'
+// or JSON body { roomId, pfpUrl }
+app.post("/update-room-pfp", requireAuth, upload.single("pfp"), (req, res) => {
+  const username = req.session.user;
+  const { roomId } = req.body;
+  if (!roomId || !store.rooms[roomId]) {
+    // maybe JSON body
+    if (!req.body.roomId && req.body.pfpUrl) {
+      return res.json({ success: false, message: "roomId required" });
+    }
+    return res.json({ success: false, message: "Room not found" });
+  }
+
+  const room = store.rooms[roomId];
+  // only owner or admin can change
+  if (room.owner !== username && !store.users[username]?.admin) {
+    return res.status(403).json({ success: false, message: "Not allowed" });
+  }
+
+  // file upload
+  if (req.file) {
+    const ext = path.extname(req.file.originalname) || ".png";
+    const destName = `room_${roomId}_${Date.now()}${ext}`;
+    const destPath = path.join(ROOM_PFP_DIR, destName);
+    try {
+      fs.renameSync(req.file.path, destPath);
+      room.pfp = `/room_pfps/${destName}`;
+    } catch (e) {
+      console.error(e);
+      try { fs.unlinkSync(req.file.path); } catch {}
+      return res.json({ success: false, message: "Upload failed" });
+    }
+  } else if (req.body.pfpUrl) {
+    // set by url
+    room.pfp = req.body.pfpUrl;
+  } else {
+    return res.json({ success: false, message: "No pfp provided" });
+  }
+
+  saveData();
+  io.emit("roomsUpdated");
+  return res.json({ success: true, pfp: room.pfp });
+});
+
+// --- Message editing/deleting endpoints (unchanged) ---
+// (kept for brevity — you likely already have these endpoints from previous code)
+// ... (the edit-message and delete-message routes from your existing server should remain here)
+
+app.post("/edit-message", requireAuth, (req,res) => {
   const { id, roomId, newMsg, dmWith } = req.body;
   const user = req.session.user;
   if (roomId && store.rooms[roomId]) {
-    const msg = (store.rooms[roomId].messages || []).find(m => m.id === id);
+    const msg = (store.rooms[roomId].messages||[]).find(m=>m.id===id);
     if (!msg) return res.json({ success: false });
-    if (msg.sender !== user && !store.users[user].admin) return res.json({ success: false });
+    if (msg.sender !== user && !store.users[user].admin) return res.json({ success:false });
     msg.message = newMsg;
     saveData();
     io.to(roomId).emit("updateMessage", msg);
-    return res.json({ success: true });
+    return res.json({ success:true });
   }
   if (dmWith) {
     const key = [user, dmWith].sort().join("_");
-    const m = (store.dms[key] || []).find(mm => mm.id === id);
-    if (!m) return res.json({ success: false });
-    if (m.sender !== user && !store.users[user].admin) return res.json({ success: false });
+    const m = (store.dms[key]||[]).find(mm=>mm.id===id);
+    if (!m) return res.json({ success:false });
+    if (m.sender !== user && !store.users[user].admin) return res.json({ success:false });
     m.message = newMsg;
     saveData();
     io.to(user).emit("updateMessage", m);
     io.to(dmWith).emit("updateMessage", m);
-    return res.json({ success: true });
+    return res.json({ success:true });
   }
-  res.json({ success: false });
+  res.json({ success:false });
 });
 
-app.post("/delete-message", requireAuth, (req, res) => {
+app.post("/delete-message", requireAuth, (req,res) => {
   const { id, roomId, dmWith } = req.body;
   const user = req.session.user;
   if (roomId && store.rooms[roomId]) {
-    const idx = (store.rooms[roomId].messages || []).findIndex(m => m.id === id);
-    if (idx === -1) return res.json({ success: false });
+    const idx = (store.rooms[roomId].messages||[]).findIndex(m=>m.id===id);
+    if (idx === -1) return res.json({ success:false });
     const msg = store.rooms[roomId].messages[idx];
-    if (msg.sender !== user && !store.users[user].admin) return res.json({ success: false });
-    store.rooms[roomId].messages.splice(idx, 1);
+    if (msg.sender !== user && !store.users[user].admin) return res.json({ success:false });
+    store.rooms[roomId].messages.splice(idx,1);
     saveData();
     io.to(roomId).emit("deleteMessage", id);
-    return res.json({ success: true });
+    return res.json({ success:true });
   }
   if (dmWith) {
     const key = [user, dmWith].sort().join("_");
     const arr = store.dms[key] || [];
-    const idx = arr.findIndex(m => m.id === id);
-    if (idx === -1) return res.json({ success: false });
+    const idx = arr.findIndex(m=>m.id===id);
+    if (idx === -1) return res.json({ success:false });
     const msg = arr[idx];
-    if (msg.sender !== user && !store.users[user].admin) return res.json({ success: false });
-    arr.splice(idx, 1);
+    if (msg.sender !== user && !store.users[user].admin) return res.json({ success:false });
+    arr.splice(idx,1);
     saveData();
     io.to(user).emit("deleteMessage", id);
     io.to(dmWith).emit("deleteMessage", id);
-    return res.json({ success: true });
+    return res.json({ success:true });
   }
-  res.json({ success: false });
+  res.json({ success:false });
 });
-
-// Optional secure admin endpoint (disabled by default).
-// If you want to programmatically make an admin from the UI or via API,
-// uncomment and secure this route (requires an existing admin).
-/*
-app.post('/make-admin', requireAuth, (req,res) => {
-  const requester = req.session.user;
-  if (!store.users[requester].admin) return res.json({success:false});
-  const { user } = req.body;
-  if (!store.users[user]) return res.json({success:false});
-  store.users[user].admin = true;
-  saveData();
-  res.json({success:true});
-});
-*/
 
 // --- SOCKET.IO ---
 io.on("connection", (socket) => {
@@ -339,8 +376,7 @@ io.on("connection", (socket) => {
     socket.emit("chatHistory", messages);
   });
 
-  // roomMessage supports optional replyTo
-  socket.on("roomMessage", ({ roomId, message, replyTo }) => {
+  socket.on("roomMessage", ({ roomId, message }) => {
     const sender = socket.username;
     if (!sender || !roomId || !store.rooms[roomId] || !message) return;
     const text = ("" + message).slice(0, 300);
@@ -350,8 +386,7 @@ io.on("connection", (socket) => {
       avatar: store.users[sender]?.avatar || "/avatars/default.png",
       message: text,
       time: Date.now(),
-      roomId,
-      replyTo: replyTo || null
+      roomId
     };
     store.rooms[roomId].messages = store.rooms[roomId].messages || [];
     store.rooms[roomId].messages.push(msgObj);
@@ -359,58 +394,38 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("roomMessage", msgObj);
   });
 
-  // dmMessage supports optional replyTo
-  socket.on("dmMessage", ({ to, message, replyTo }) => {
+  socket.on("dmMessage", ({ to, message }) => {
     const from = socket.username;
     if (!from || !to || !store.users[to] || !message) return;
     const text = ("" + message).slice(0, 300);
     const msg = {
       id: genId(),
       sender: from,
+      to,
       avatar: store.users[from]?.avatar || "/avatars/default.png",
       message: text,
-      time: Date.now(),
-      to,
-      replyTo: replyTo || null
+      time: Date.now()
     };
     const key = [from, to].sort().join("_");
     store.dms[key] = store.dms[key] || [];
     store.dms[key].push(msg);
     saveData();
-    // send to both sender and receiver
     io.to(to).emit("dmMessage", msg);
     io.to(from).emit("dmMessage", msg);
-    // notify receiver
     io.to(to).emit("dmNotification", { from });
   });
 
-  // Owner commands for rooms (kick, setpfp)
-  socket.on("roomCommand", ({ roomId, command, args }) => {
-    const user = socket.username;
-    if (!user || !store.rooms[roomId]) return;
-    const room = store.rooms[roomId];
-    const isAllowed = room.owner === user || (store.users[user] && store.users[user].admin);
-    if (!isAllowed) return;
-    const cmd = (command || '').toLowerCase();
-    if (cmd === 'kick') {
-      const who = args?.[0];
-      if (!who || !store.users[who]) return;
-      // remove from room.user list (if tracked)
-      room.users = (room.users || []).filter(u => u !== who);
+  socket.on("sendFriendRequest", async (to) => {
+    const from = socket.username;
+    if (!from || !to || !store.users[to]) return;
+    store.friendRequests[to] = store.friendRequests[to] || [];
+    if (!store.friendRequests[to].includes(from) && !store.users[to].friends.includes(from)) {
+      store.friendRequests[to].push(from);
       saveData();
-      // inform kicked user
-      io.to(who).emit("roomKicked", { roomId, by: user });
-      io.to(roomId).emit("roomNotice", { text: `${who} was kicked by ${user}` });
-    } else if (cmd === 'setpfp') {
-      const url = args?.[0] || null;
-      room.pfp = url;
-      saveData();
-      io.emit("roomUpdated", { roomId, room });
-      io.to(roomId).emit("roomNotice", { text: `Room picture updated by ${user}` });
+      io.to(to).emit("friendRequest", from);
     }
   });
 
-  // fetch friends/requests via socket
   socket.on("fetchFriends", () => {
     const u = socket.username;
     if (!u || !store.users[u]) return;
@@ -422,4 +437,4 @@ io.on("connection", (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-httpServer.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
+httpServer.listen(PORT, () => console.log(`Server running on port ${PORT}`));
