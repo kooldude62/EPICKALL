@@ -1,19 +1,20 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html>
 <head>
-<meta charset="utf-8" />
+<meta charset="utf-8">
 <title>Epick Chat</title>
 <script src="/socket.io/socket.io.js"></script>
 <style>
-:root{ --bg:#0f1114; --panel:rgba(255,255,255,0.04); --muted:rgba(255,255,255,0.6); --accent:#6b8cff; --glass:rgba(255,255,255,0.03); --glass-2:rgba(255,255,255,0.02) }
-*{box-sizing:border-box;} body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#071021,#0f1114);color:#e8eefc;min-height:100vh}
-.navbar{display:flex;justify-content:space-between;padding:12px 20px;background:var(--glass-2);border-bottom:1px solid rgba(255,255,255,0.02)}
+:root{--bg:#0f1114;--panel:rgba(255,255,255,0.04);--muted:rgba(255,255,255,0.6);--accent:#6b8cff}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#071021,#0f1114);color:#e8eefc}
+.navbar{display:flex;justify-content:space-between;padding:12px 20px;background:var(--panel);border-bottom:1px solid rgba(255,255,255,0.02)}
 .brand{font-weight:700;color:var(--accent)}
 .nav-actions{display:flex;gap:8px;align-items:center}
 .inbox-btn{position:relative;padding:8px;border-radius:8px;background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted);cursor:pointer}
 .inbox-badge{position:absolute;top:-6px;right:-6px;background:var(--accent);color:#05102a;padding:2px 6px;border-radius:999px;font-weight:700;font-size:12px}
 .tabs{display:flex;gap:8px;margin:16px;padding:0 12px}
-.tab{padding:10px 12px;border-radius:10px;background:var(--glass-2);cursor:pointer;color:var(--muted)}
+.tab{padding:10px 12px;border-radius:10px;background:transparent;cursor:pointer;color:var(--muted)}
 .tab.active{background:linear-gradient(90deg, rgba(107,140,255,0.12), rgba(107,140,255,0.06));color:#fff}
 main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
 .panel{background:var(--panel);border-radius:12px;padding:12px;min-height:60vh;display:none;flex-direction:column;gap:12px}
@@ -30,7 +31,7 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
 .chat-message{display:flex;gap:10px;align-items:flex-start}
 .chat-message .bubble{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:10px;border-radius:10px;max-width:72%}
 .chat-message.me .bubble{background:linear-gradient(180deg, rgba(107,140,255,0.14), rgba(107,140,255,0.08));align-self:flex-end}
-.bubble .actions{margin-top:4px;font-size:12px;display:flex;gap:6px;color:var(--muted);cursor:pointer}
+.bubble .actions{margin-top:6px;font-size:12px;display:flex;gap:8px;color:var(--muted)}
 .btn{padding:8px 10px;border-radius:8px;border:none;background:var(--accent);color:#05102a;cursor:pointer}
 .btn.secondary{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted)}
 .small{font-size:13px;color:var(--muted)}
@@ -53,9 +54,7 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
 <div id="inboxPanel" class="inbox-panel" style="display:none">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
     <div style="font-weight:700">Inbox</div>
-    <div>
-      <button id="markAllRead" class="btn secondary">Mark all read</button>
-    </div>
+    <div><button id="markAllRead" class="btn secondary">Mark all read</button></div>
   </div>
   <div id="inboxList" style="max-height:300px;overflow:auto"></div>
   <div id="inboxEmpty" style="opacity:0.7;margin-top:8px">No notifications</div>
@@ -115,6 +114,7 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
   const socket = io();
   let me = null, isAdmin = false, current = null;
   const unreadDMs = new Set();
+
   // elements
   const inboxBtn = document.getElementById('inboxBtn');
   const inboxBadge = document.getElementById('inboxBadge');
@@ -138,79 +138,44 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
   const sendBtn = document.getElementById('sendBtn');
   const closeChatBtn = document.getElementById('closeChat');
 
-  function showBadge(n) {
-    if (!n || n <= 0) { inboxBadge.style.display = 'none'; inboxBadge.textContent = '0'; }
-    else { inboxBadge.style.display = ''; inboxBadge.textContent = String(n); }
-  }
+  function showBadge(n) { if(!n || n<=0) {inboxBadge.style.display='none'} else {inboxBadge.style.display=''; inboxBadge.textContent=String(n);} }
+  function showInboxPanel(show){ inboxPanel.style.display = show ? '' : 'none'; }
 
-  function showInboxPanel(show) {
-    inboxPanel.style.display = show ? '' : 'none';
-  }
+  inboxBtn.onclick = ()=>{ const visible = inboxPanel.style.display !== 'none'; showInboxPanel(!visible); if(!visible) loadInbox(); };
 
-  inboxBtn.onclick = () => {
-    const visible = inboxPanel.style.display !== 'none';
-    showInboxPanel(!visible);
-    if (!visible) loadInbox(); // refresh when opening
-  };
+  markAllReadBtn.onclick = async ()=>{ await fetch('/inbox/mark-read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ id:'all' })}); await loadInbox(); };
 
-  markAllReadBtn.onclick = async () => {
-    await fetch('/inbox/mark-read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: 'all' })});
-    await loadInbox();
-  };
-
-  tabs.forEach(tab=>tab.addEventListener('click', ()=>{
-    tabs.forEach(t=>t.classList.remove('active'));
-    panels.forEach(p=>p.classList.remove('active'));
-    tab.classList.add('active');
-    document.getElementById(tab.dataset.tab).classList.add('active');
-  }));
+  tabs.forEach(tab=>tab.addEventListener('click', ()=>{ tabs.forEach(t=>t.classList.remove('active')); panels.forEach(p=>p.classList.remove('active')); tab.classList.add('active'); document.getElementById(tab.dataset.tab).classList.add('active'); }));
 
   document.getElementById('accountBtn').onclick = ()=> location.href = '/account.html';
   document.getElementById('logoutBtn').onclick = async ()=> { await fetch('/logout',{method:'POST'}); location.href = '/login.html'; };
 
-  async function api(path, opts = {}) {
-    try {
-      const r = await fetch(path, opts);
-      return await r.json();
-    } catch (e) {
-      console.error('API error', path, e);
-      return null;
-    }
-  }
+  async function api(path, opts={}){ try{ const r = await fetch(path, opts); return await r.json(); } catch(e){ console.error('API error', path, e); return null; } }
 
-  // initialize load
   async function init(){
     const meRes = await api('/me');
     if(!meRes || !meRes.loggedIn) return location.href = '/login.html';
     me = meRes.username; isAdmin = !!meRes.admin;
     socket.emit('registerUser', me);
     await Promise.all([loadFriendsAndRecent(), loadRooms(), loadDMList()]);
-    await loadInbox(); // get initial inbox notifications
+    await loadInbox();
   }
 
   // ---------- INBOX ----------
   async function loadInbox(){
-    const res = await api('/inbox');
-    if (!res || !res.success) {
-      inboxList.innerHTML = ''; inboxEmpty.style.display = ''; showBadge(0); return;
-    }
+    const res = await api('/inbox'); if(!res || !res.success) { inboxList.innerHTML=''; inboxEmpty.style.display=''; showBadge(0); return; }
     const notes = res.notifications || [];
     inboxList.innerHTML = '';
-    if (notes.length === 0) inboxEmpty.style.display = '';
-    else inboxEmpty.style.display = 'none';
+    if(notes.length === 0) inboxEmpty.style.display = ''; else inboxEmpty.style.display = 'none';
     let unreadCount = 0;
     notes.forEach(n=>{
-      if (!n.read) unreadCount++;
-      const item = document.createElement('div');
-      item.className = 'inbox-item' + (n.read ? '' : ' unread');
-      item.innerHTML = `<div style="display:flex;justify-content:space-between"><div style="font-weight:600">${n.type}</div><div style="font-size:12px;color:var(--muted)">${new Date(n.time).toLocaleString()}</div></div><div style="margin-top:6px;color:var(--muted);font-size:13px">${renderNotifText(n)}</div>`;
-      item.onclick = async () => {
-        // mark read
-        await fetch('/inbox/mark-read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: n.id })});
-        // handle action depending on type
-        if (n.type === 'dm') openDM(n.payload.from);
-        if (n.type === 'friend_request') { tabs.forEach(t=>t.classList.remove('active')); panels.forEach(p=>p.classList.remove('active')); document.querySelector('.tab[data-tab="friends"]').classList.add('active'); document.getElementById('friends').classList.add('active'); loadFriendsAndRecent(); }
-        // refresh inbox list
+      if(!n.read) unreadCount++;
+      const item = document.createElement('div'); item.className='inbox-item' + (n.read ? '' : ' unread');
+      item.innerHTML = `<div style="display:flex;justify-content:space-between"><div style="font-weight:600">${n.type}</div><div style="font-size:12px;color:var(--muted)">${formatDate(n.time)}</div></div><div style="margin-top:6px;color:var(--muted);font-size:13px">${renderNotifText(n)}</div>`;
+      item.onclick = async ()=>{
+        await fetch('/inbox/mark-read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ id:n.id })});
+        if(n.type === 'dm' && n.payload && n.payload.from) openDM(n.payload.from);
+        if(n.type === 'friend_request') { tabs.forEach(t=>t.classList.remove('active')); panels.forEach(p=>p.classList.remove('active')); document.querySelector('.tab[data-tab="friends"]').classList.add('active'); document.getElementById('friends').classList.add('active'); loadFriendsAndRecent(); }
         await loadInbox();
       };
       inboxList.appendChild(item);
@@ -218,28 +183,24 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     showBadge(unreadCount);
   }
 
-  function renderNotifText(n) {
-    if (n.type === 'dm') return `New message from ${n.payload.from}`;
-    if (n.type === 'friend_request') return `Friend request from ${n.payload.from}`;
-    if (n.type === 'friend_accept') return `${n.payload.by} accepted your friend request`;
+  function renderNotifText(n){
+    if(n.type === 'dm') return `New DM from ${n.payload.from}`;
+    if(n.type === 'friend_request') return `Friend request from ${n.payload.from}`;
+    if(n.type === 'friend_accept') return `${n.payload.by} accepted your friend request`;
     return JSON.stringify(n.payload || {});
   }
 
-  // server pushes an inboxUpdate for a single notification
-  socket.on('inboxUpdate', (n) => {
-    // reload list if open, otherwise increment badge
-    if (inboxPanel.style.display !== 'none') loadInbox();
+  socket.on('inboxUpdate', n => {
+    if(inboxPanel.style.display !== 'none') loadInbox();
     else {
-      // increment badge
-      const current = parseInt(inboxBadge.textContent || "0") || 0;
+      const current = parseInt(inboxBadge.textContent || '0') || 0;
       showBadge(current + 1);
     }
   });
 
-  // ---------- FRIENDS + RECENT ----------
+  // ---------- FRIENDS ----------
   async function loadFriendsAndRecent(){
     const data = await api('/friends'); if(!data) return;
-    // requests
     friendRequestsDiv.innerHTML = '';
     (data.requests||[]).forEach(r=>{
       const el = document.createElement('div'); el.className='list-item';
@@ -253,7 +214,6 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
       friendRequestsDiv.appendChild(el);
     });
 
-    // friends
     friendsListDiv.innerHTML = '';
     (data.friends||[]).forEach(f=>{
       const el = document.createElement('div'); el.className='list-item';
@@ -262,7 +222,6 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
       friendsListDiv.appendChild(el);
     });
 
-    // recent
     recentUsersDiv.innerHTML = '';
     (data.recent||[]).forEach(u=>{
       const el = document.createElement('div'); el.className='list-item';
@@ -278,25 +237,23 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     });
   }
 
-  // ---------- ROOMS (with PFP + Manage) ----------
+  // ---------- ROOMS ----------
   async function loadRooms(){
     const data = await api('/rooms'); if(!data) return;
     roomsListDiv.innerHTML = '';
     Object.entries(data).forEach(([id, r])=>{
       const el = document.createElement('div'); el.className='list-item';
-      // left
       const left = document.createElement('div'); left.style.display='flex'; left.style.alignItems='center';
       const img = document.createElement('img'); img.className='room-pfp'; img.src = r.pfp || '/room_pfps/default.png';
       const meta = document.createElement('div'); meta.innerHTML = `<div style="font-weight:600">${r.name}</div><div style="font-size:12px;color:var(--muted)">owner: ${r.owner||'—'}</div>`;
       left.appendChild(img); left.appendChild(meta);
-      // right buttons
       const right = document.createElement('div');
       const joinBtn = document.createElement('button'); joinBtn.className='btn secondary'; joinBtn.textContent='Join';
       joinBtn.onclick = ()=> openRoom(id, r.name);
       right.appendChild(joinBtn);
       if (r.owner === me || isAdmin) {
-        const manage = document.createElement('button'); manage.className='room-manage'; manage.textContent='Manage';
-        manage.onclick = (e) => { e.stopPropagation(); openRoomManageDialog(id, r); };
+        const manage = document.createElement('button'); manage.className='btn secondary'; manage.textContent='Manage';
+        manage.onclick = (e)=>{ e.stopPropagation(); openRoomManageDialog(id, r); };
         right.appendChild(manage);
       }
       el.appendChild(left); el.appendChild(right);
@@ -305,29 +262,31 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     });
   }
 
-  // manage dialog (upload or set Url)
+  document.getElementById('createRoomBtn').onclick = async ()=>{
+    const name = (document.getElementById('roomName').value || '').trim();
+    if(!name) return alert('Enter a room name');
+    const res = await fetch('/create-room',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ name })});
+    const j = await res.json();
+    if(j.success){ await loadRooms(); openRoom(j.roomId, name); socket.emit('roomsUpdated'); } else alert(j.message || 'Create failed');
+  };
+
   function openRoomManageDialog(roomId, roomObj){
     const fileInput = document.createElement('input'); fileInput.type='file'; fileInput.accept='image/*';
-    fileInput.onchange = async () => {
-      if (!fileInput.files || fileInput.files.length === 0) return;
-      const fd = new FormData();
-      fd.append('pfp', fileInput.files[0]);
-      fd.append('roomId', roomId);
-      const res = await fetch('/update-room-pfp', { method:'POST', body: fd });
+    fileInput.onchange = async ()=>{
+      if(!fileInput.files || fileInput.files.length===0) return;
+      const fd = new FormData(); fd.append('pfp', fileInput.files[0]); fd.append('roomId', roomId);
+      const res = await fetch('/update-room-pfp',{ method:'POST', body: fd });
       const j = await res.json();
-      if (j.success) { alert('Room image updated'); loadRooms(); }
+      if(j.success) { alert('Room image updated'); loadRooms(); }
       else alert(j.message || 'Failed');
     };
     const url = prompt('Paste image URL to set as room image (leave empty to choose a file):');
-    if (url && url.trim()) {
-      fetch('/update-room-pfp', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ roomId, pfpUrl: url.trim() }) })
-        .then(r=>r.json()).then(j=>{ if (j.success) { alert('Room image updated'); loadRooms(); } else alert(j.message||'Failed'); });
-    } else {
-      fileInput.click();
-    }
+    if(url && url.trim()) {
+      fetch('/update-room-pfp',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ roomId, pfpUrl: url.trim() }) }).then(r=>r.json()).then(j=>{ if(j.success){ alert('Room image updated'); loadRooms(); } else alert(j.message||'Failed'); });
+    } else fileInput.click();
   }
 
-  // ---------- DM LIST (with unread bubble + move unread to top) ----------
+  // ---------- DMs ----------
   async function loadDMList(){
     const data = await api('/friends'); if(!data) return;
     dmListDiv.innerHTML = '';
@@ -341,9 +300,9 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     });
   }
 
-  // ---------- CHAT (rooms + dms) ----------
+  // ---------- CHAT ----------
   function setChatHeaderRoom(id, name, pfp) {
-    chatTitle.innerHTML = `<img src="${pfp||'/room_pfps/default.png'}" style="width:32px;height:32px;border-radius:6px;margin-right:8px"> <span># ${name}</span>`;
+    chatTitle.innerHTML = `<img src="${pfp||'/room_pfps/default.png'}" style="width:32px;height:32px;border-radius:6px;margin-right:8px"><span># ${name}</span>`;
   }
 
   async function openRoom(id, name){
@@ -352,7 +311,7 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     setChatHeaderRoom(id, name, (info && info.success) ? info.pfp : '/room_pfps/default.png');
     chatMessages.innerHTML = '';
     chatOverlay.classList.remove('hidden'); chatOverlay.setAttribute('aria-hidden','false');
-    socket.emit('joinRoom', { roomId: id });
+    socket.emit('joinRoom',{ roomId: id });
   }
 
   async function openDM(username){
@@ -360,36 +319,33 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     chatTitle.innerHTML = `<img src="/avatars/default.png" style="width:32px;height:32px;border-radius:50%;margin-right:8px"><span>@ ${username}</span>`;
     chatMessages.innerHTML = '';
     const r = await api(`/dm/${username}`);
-    if (r && r.success) (r.messages||[]).forEach(m => appendMessage(m));
+    if(r && r.success) (r.messages||[]).forEach(m=>appendMessage(m));
     chatOverlay.classList.remove('hidden'); chatOverlay.setAttribute('aria-hidden','false');
     unreadDMs.delete(username);
     loadDMList();
-    // mark related inbox notifications read locally by calling mark-read for any DM notifications? (optional)
   }
 
-  function createMessageElement(m) {
+  function formatDate(ts){
+    const d = new Date(ts||Date.now());
+    const optsTime = { hour: 'numeric', minute: '2-digit' };
+    const timeStr = d.toLocaleTimeString([], optsTime);
+    return `${timeStr}, ${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`;
+  }
+
+  function createMessageElement(m){
     const el = document.createElement('div'); el.className = 'chat-message' + (m.sender===me ? ' me' : '');
     el.dataset.msgid = m.id;
-    const av = document.createElement('img'); av.src = m.avatar || '/avatars/default.png'; av.className='pfp';
+    const av = document.createElement('img'); av.src = m.avatar||'/avatars/default.png'; av.className='pfp';
     const bubble = document.createElement('div'); bubble.className='bubble';
-    bubble.innerHTML = `<div style="font-size:12px;color:var(--muted)">${m.sender} • ${new Date(m.time||Date.now()).toLocaleString()}</div><div style="margin-top:6px">${escapeHtml(m.message||'')}</div>`;
-    if (m.sender===me || isAdmin) {
+    bubble.innerHTML = `<div style="font-size:12px;color:var(--muted)">${m.sender} • ${formatDate(m.time)}</div><div style="margin-top:6px">${escapeHtml(m.message||'')}</div>`;
+    // actions: edit/delete for own or admin
+    if(m.sender === me || isAdmin) {
       const actions = document.createElement('div'); actions.className='actions';
-      actions.innerHTML = `<span data-act="reply">Reply</span> <span data-act="edit">Edit</span> <span data-act="delete">Delete</span>`;
-      actions.onclick = async (e) => {
+      actions.innerHTML = `<span data-act="edit" style="cursor:pointer">Edit</span><span data-act="delete" style="cursor:pointer">Delete</span>`;
+      actions.onclick = async (e)=>{
         const act = e.target.dataset.act;
-        if (act === 'reply') { chatInput.value = `@${m.sender} ${chatInput.value}`; chatInput.focus(); }
-        if (act === 'edit') {
-          const newMsg = prompt('Edit message:', m.message);
-          if (!newMsg) return;
-          await fetch('/edit-message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: m.id, newMsg, dmWith: current?.type==='dm' ? current.id : undefined, roomId: current?.type==='room' ? current.id : undefined }) });
-        }
-        if (act === 'delete') {
-          if (!confirm('Delete message?')) return;
-          await fetch('/delete-message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: m.id, dmWith: current?.type==='dm' ? current.id : undefined, roomId: current?.type==='room' ? current.id : undefined }) });
-          const found = chatMessages.querySelector(`[data-msgid="${m.id}"]`);
-          if (found) found.remove();
-        }
+        if(act === 'edit'){ const newMsg = prompt('Edit message:', m.message); if(newMsg!==null) { await fetch('/edit-message',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: m.id, newMsg, dmWith: current?.type==='dm' ? current.id : undefined, roomId: current?.type==='room' ? current.id : undefined }) }); } }
+        if(act === 'delete'){ if(confirm('Delete message?')) { await fetch('/delete-message',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: m.id, dmWith: current?.type==='dm' ? current.id : undefined, roomId: current?.type==='room' ? current.id : undefined }) }); const found = chatMessages.querySelector(`[data-msgid="${m.id}"]`); if(found) found.remove(); } }
       };
       bubble.appendChild(actions);
     }
@@ -397,154 +353,83 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     return el;
   }
 
-  // Appending with temp replacement: if tempId matches, replace optimistic element
-  function appendMessage(m) {
-    if (!m || !m.id) return;
-    // if server sent tempId & we have an optimistic element with that tempId => replace it
-    if (m.tempId) {
+  // Append with temp replacement behavior
+  function appendMessage(m){
+    if(!m || !m.id) return;
+    if(m.tempId) {
       const optimistic = chatMessages.querySelector(`[data-msgid="${m.tempId}"]`);
-      if (optimistic) {
+      if(optimistic) {
         optimistic.dataset.msgid = m.id;
         const bubble = optimistic.querySelector('.bubble');
-        if (bubble) {
-          bubble.innerHTML = `<div style="font-size:12px;color:var(--muted)">${m.sender} • ${new Date(m.time||Date.now()).toLocaleString()}</div><div style="margin-top:6px">${escapeHtml(m.message||'')}</div>`;
-        }
-        // also update avatar if needed
+        if(bubble) bubble.innerHTML = `<div style="font-size:12px;color:var(--muted)">${m.sender} • ${formatDate(m.time)}</div><div style="margin-top:6px">${escapeHtml(m.message||'')}</div>`;
         const img = optimistic.querySelector('img.pfp');
-        if (img && m.avatar) img.src = m.avatar;
+        if(img && m.avatar) img.src = m.avatar;
         chatMessages.scrollTop = chatMessages.scrollHeight;
         return;
       }
     }
-
-    // skip if message already present by id
-    if (document.querySelector(`[data-msgid="${m.id}"]`)) return;
-
+    if(document.querySelector(`[data-msgid="${m.id}"]`)) return;
     const el = createMessageElement(m);
     chatMessages.appendChild(el);
     chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 
-  // sending: for DM include tempId and create optimistic element with that id
-  async function sendMessage() {
-    const txt = chatInput.value.trim();
-    if (!txt) return;
-    if (!current) return alert('Open a room or DM first');
-    if (current.type === 'room') {
+  async function sendMessage(){
+    const txt = (chatInput.value || "").trim();
+    if(!txt) return;
+    if(!current) return alert('Open a room or DM first');
+    if(current.type === 'room') {
       socket.emit('roomMessage', { roomId: current.id, message: txt });
     } else {
       const tempId = 'temp-' + Date.now() + '-' + Math.floor(Math.random()*1000);
       const tempMsg = { id: tempId, sender: me, avatar: null, message: txt, time: Date.now(), to: current.id };
-      // add optimistic
       appendMessage(tempMsg);
-      // include tempId in payload so server echoes it back
       socket.emit('dmMessage', { to: current.id, message: txt, tempId });
     }
     chatInput.value = '';
   }
 
   sendBtn.onclick = sendMessage;
-  chatInput.addEventListener('keydown', e=>{ if (e.key === 'Enter') sendMessage(); });
+  chatInput.addEventListener('keydown', e=>{ if(e.key === 'Enter') sendMessage(); });
 
-  // ---------- SOCKET: handle events ----------
-  socket.on('chatHistory', msgs => {
-    chatMessages.innerHTML = '';
-    (msgs||[]).forEach(m => appendMessage(m));
-  });
-
-  socket.on('roomMessage', m => {
-    if (current?.type==='room' && current.id === m.roomId) appendMessage(m);
-  });
-
+  // socket events
+  socket.on('chatHistory', msgs => { chatMessages.innerHTML = ''; (msgs||[]).forEach(m => appendMessage(m)); });
+  socket.on('roomMessage', m => { if(current?.type==='room' && current.id === m.roomId) appendMessage(m); });
   socket.on('dmMessage', m => {
-    // if DM currently open with partner -> append or replace if tempId present
-    if (current?.type === 'dm' && (current.id === m.sender || current.id === m.to)) {
-      appendMessage(m);
-    } else {
-      // not open: mark unread and show inbox notification badge
+    if(current?.type==='dm' && (current.id === m.sender || current.id === m.to)) appendMessage(m);
+    else {
+      // mark unread and add badge
       const other = (m.sender === me) ? m.to : m.sender;
       unreadDMs.add(other);
       loadDMList();
-      // server also emits an inboxUpdate separate event which will increase badge; but fallback:
-      const currentBadge = parseInt(inboxBadge.textContent || '0') || 0;
-      showBadge(currentBadge + 1);
+      const curr = parseInt(inboxBadge.textContent||'0')||0; showBadge(curr+1);
     }
   });
-
-  // server-side inbox push
-  socket.on('inboxUpdate', (n) => {
-    // refresh if inbox open, else increment badge
-    if (inboxPanel.style.display !== 'none') loadInbox();
-    else {
-      const current = parseInt(inboxBadge.textContent || '0') || 0;
-      showBadge(current + 1);
+  socket.on('inboxUpdate', ()=> { if(inboxPanel.style.display !== 'none') loadInbox(); else { const curr = parseInt(inboxBadge.textContent||'0')||0; showBadge(curr+1); } });
+  socket.on('kickedFromRoom', ({roomId, by, reason}) => {
+    if(current?.type==='room' && current.id === roomId) {
+      alert(`You were removed from the room by ${by}${reason?(' ('+reason+')'):''}`);
+      chatOverlay.classList.add('hidden'); chatOverlay.setAttribute('aria-hidden','true'); current = null;
     }
   });
-
-  socket.on('dmNotification', ({from}) => {
-    // small toast or handling
-    console.log('DM notification from', from);
-  });
-
-  socket.on('friendRequest', from => {
-    loadFriendsAndRecent();
-    // optionally add inbox notification was done on server already
-  });
-
-  socket.on('friendsUpdate', ()=> { loadFriendsAndRecent(); loadDMList(); });
+  socket.on('friendsUpdate', ()=>{ loadFriendsAndRecent(); loadDMList(); });
   socket.on('roomsUpdated', ()=> loadRooms());
   socket.on('updateMessage', msg => {
     const el = chatMessages.querySelector(`[data-msgid="${msg.id}"] .bubble div:nth-child(2)`);
-    if (el) el.textContent = msg.message || '';
+    if(el) el.textContent = msg.message || '';
   });
   socket.on('deleteMessage', id => {
     const el = chatMessages.querySelector(`[data-msgid="${id}"]`);
-    if (el) el.remove();
+    if(el) el.remove();
   });
 
   socket.on('connect', ()=> socket.emit('fetchFriends'));
 
-  // ---------- load helpers ----------
-  async function loadFriendsAndRecent(){ const data = await api('/friends'); if(!data) return;
-    friendRequestsDiv.innerHTML = '';
-    (data.requests||[]).forEach(r=>{
-      const el = document.createElement('div'); el.className='list-item';
-      el.innerHTML = `<div>${r}</div><div><button class="btn secondary">Accept</button></div>`;
-      el.querySelector('button').onclick = async e=>{
-        e.stopPropagation();
-        await fetch('/accept-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ from:r })});
-        socket.emit('fetchFriends');
-        await loadFriendsAndRecent();
-      };
-      friendRequestsDiv.appendChild(el);
-    });
-    friendsListDiv.innerHTML = '';
-    (data.friends||[]).forEach(f=>{
-      const el = document.createElement('div'); el.className='list-item';
-      el.innerHTML = `<div style="display:flex;align-items:center;gap:8px"><img src="${f.avatar||'/avatars/default.png'}" class="pfp"><div>${f.username}</div></div>`;
-      el.onclick = ()=> openDM(f.username);
-      friendsListDiv.appendChild(el);
-    });
-    recentUsersDiv.innerHTML = '';
-    (data.recent||[]).forEach(u=>{
-      const el = document.createElement('div'); el.className='list-item';
-      el.innerHTML = `<div style="display:flex;align-items:center;gap:8px"><img src="${u.avatar||'/avatars/default.png'}" class="pfp"><div>${u.username}</div></div><div><button class="btn secondary">Add</button></div>`;
-      el.querySelector('button').onclick = async e=>{
-        e.stopPropagation();
-        const resp = await fetch('/friend-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ to: u.username })});
-        const j = await resp.json();
-        alert(j.success ? 'Request sent' : j.message || 'Error');
-        await loadFriendsAndRecent();
-      };
-      recentUsersDiv.appendChild(el);
-    });
-  }
-
-  // ---------- initialize ----------
-  await init();
-
-  // ---------- utility ----------
+  // ---------- helpers ----------
   function escapeHtml(s){ return (s||'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  // initial load
+  await init();
 
 })();
 </script>
