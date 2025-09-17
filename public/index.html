@@ -23,10 +23,11 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
 .list-item{display:flex;align-items:center;justify-content:space-between;padding:8px;border-radius:8px;background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));cursor:pointer}
 .pfp{width:36px;height:36px;border-radius:50%;object-fit:cover;border:1px solid rgba(255,255,255,0.04)}
 .room-pfp{width:40px;height:40px;border-radius:6px;object-fit:cover;border:1px solid rgba(255,255,255,0.04);margin-right:8px}
-.chat-overlay{position:fixed;inset:0;background:linear-gradient(180deg, rgba(1,4,8,0.85), rgba(1,4,8,0.95));display:flex;flex-direction:column;z-index:1200}
+.chat-overlay{position:fixed;inset:0;background:linear-gradient(180deg, rgba(1,4,8,0.85), rgba(1,4,8,0.95));display:flex;flex-direction:column;z-index:1200;align-items:center;justify-content:center}
 .chat-overlay.hidden{display:none}
-.chat-messages{flex:1;padding:18px;overflow:auto;display:flex;flex-direction:column;gap:10px}
-.chat-input{display:flex;gap:8px;padding:14px;border-top:1px solid rgba(255,255,255,0.02)}
+.chat-window{width:90%;max-width:980px;height:80%;background:transparent;display:flex;flex-direction:column;border-radius:12px;overflow:hidden}
+.chat-messages{flex:1;padding:18px;overflow:auto;display:flex;flex-direction:column;gap:10px;background:var(--panel);border-radius:12px}
+.chat-input{display:flex;gap:8px;padding:12px;border-top:1px solid rgba(255,255,255,0.02);background:linear-gradient(180deg, rgba(0,0,0,0.06), rgba(0,0,0,0.03))}
 .chat-input input{flex:1;padding:12px;border-radius:10px;background:rgba(255,255,255,0.02);color:#fff;border:1px solid rgba(255,255,255,0.03)}
 .chat-message{display:flex;gap:10px;align-items:flex-start}
 .chat-message .bubble{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:10px;border-radius:10px;max-width:72%}
@@ -96,16 +97,20 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
 </main>
 
 <div id="chatOverlay" class="chat-overlay hidden" aria-hidden="true">
-  <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;border-bottom:1px solid rgba(255,255,255,0.02)">
-    <div id="chatTitle" style="display:flex;align-items:center;gap:8px">Chat</div>
-    <div style="display:flex;gap:8px;align-items:center">
-      <button id="closeChat" class="btn secondary">Close</button>
+  <div class="chat-window" role="dialog" aria-modal="true">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;border-bottom:1px solid rgba(255,255,255,0.02);background:transparent">
+      <div id="chatTitle" style="display:flex;align-items:center;gap:8px">Chat</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button id="closeChat" class="btn secondary">Close</button>
+      </div>
     </div>
-  </div>
-  <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
-  <div class="chat-input">
-    <input id="chatInput" maxlength="300" placeholder="Type a message (Enter to send)">
-    <button id="sendBtn" class="btn">Send</button>
+
+    <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
+
+    <div class="chat-input">
+      <input id="chatInput" maxlength="300" placeholder="Type a message (Enter to send)">
+      <button id="sendBtn" class="btn">Send</button>
+    </div>
   </div>
 </div>
 
@@ -132,6 +137,7 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
   const dmListDiv = document.getElementById('dmList');
 
   const chatOverlay = document.getElementById('chatOverlay');
+  const chatWindow = document.querySelector('.chat-window');
   const chatTitle = document.getElementById('chatTitle');
   const chatMessages = document.getElementById('chatMessages');
   const chatInput = document.getElementById('chatInput');
@@ -150,7 +156,7 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
   document.getElementById('accountBtn').onclick = ()=> location.href = '/account.html';
   document.getElementById('logoutBtn').onclick = async ()=> { await fetch('/logout',{method:'POST'}); location.href = '/login.html'; };
 
-  async function api(path, opts={}){ try{ const r = await fetch(path, opts); return await r.json(); } catch(e){ console.error('API error', path, e); return null; } }
+  async function api(path, opts={}) { try { const r = await fetch(path, opts); return await r.json(); } catch (e) { console.error('API error', path, e); return null; } }
 
   async function init(){
     const meRes = await api('/me');
@@ -175,14 +181,13 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
       item.onclick = async ()=>{
         await fetch('/inbox/mark-read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ id:n.id })});
         if(n.type === 'dm' && n.payload && n.payload.from) openDM(n.payload.from);
-        if(n.type === 'friend_request') { tabs.forEach(t=>t.classList.remove('active')); panels.forEach(p=>p.classList.remove('active')); document.querySelector('.tab[data-tab="friends"]').classList.add('active'); document.getElementById('friends').classList.add('active'); loadFriendsAndRecent(); }
+        if(n.type === 'friend_request') { document.querySelector('.tab[data-tab="friends"]').click(); loadFriendsAndRecent(); }
         await loadInbox();
       };
       inboxList.appendChild(item);
     });
     showBadge(unreadCount);
   }
-
   function renderNotifText(n){
     if(n.type === 'dm') return `New DM from ${n.payload.from}`;
     if(n.type === 'friend_request') return `Friend request from ${n.payload.from}`;
@@ -205,12 +210,7 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     (data.requests||[]).forEach(r=>{
       const el = document.createElement('div'); el.className='list-item';
       el.innerHTML = `<div>${r}</div><div><button class="btn secondary">Accept</button></div>`;
-      el.querySelector('button').onclick = async e=>{
-        e.stopPropagation();
-        await fetch('/accept-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ from:r })});
-        socket.emit('fetchFriends');
-        await loadFriendsAndRecent();
-      };
+      el.querySelector('button').onclick = async e=>{ e.stopPropagation(); await fetch('/accept-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ from:r })}); socket.emit('fetchFriends'); await loadFriendsAndRecent(); };
       friendRequestsDiv.appendChild(el);
     });
 
@@ -226,13 +226,7 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     (data.recent||[]).forEach(u=>{
       const el = document.createElement('div'); el.className='list-item';
       el.innerHTML = `<div style="display:flex;align-items:center;gap:8px"><img src="${u.avatar||'/avatars/default.png'}" class="pfp"><div>${u.username}</div></div><div><button class="btn secondary">Add</button></div>`;
-      el.querySelector('button').onclick = async e=>{
-        e.stopPropagation();
-        const resp = await fetch('/friend-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ to: u.username })});
-        const j = await resp.json();
-        alert(j.success ? 'Request sent' : j.message || 'Error');
-        await loadFriendsAndRecent();
-      };
+      el.querySelector('button').onclick = async e=>{ e.stopPropagation(); const resp = await fetch('/friend-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ to: u.username })}); const j = await resp.json(); alert(j.success ? 'Request sent' : j.message || 'Error'); await loadFriendsAndRecent(); };
       recentUsersDiv.appendChild(el);
     });
   }
@@ -245,7 +239,7 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
       const el = document.createElement('div'); el.className='list-item';
       const left = document.createElement('div'); left.style.display='flex'; left.style.alignItems='center';
       const img = document.createElement('img'); img.className='room-pfp'; img.src = r.pfp || '/room_pfps/default.png';
-      const meta = document.createElement('div'); meta.innerHTML = `<div style="font-weight:600">${r.name}</div><div style="font-size:12px;color:var(--muted)">owner: ${r.owner||'—'}</div>`;
+      const meta = document.createElement('div'); meta.innerHTML = `<div style="font-weight:600">${r.name}</div><div style="font-size:12px;color:var(--muted)">${r.description||''}</div><div style="font-size:11px;color:var(--muted)">owner: ${r.owner||'—'}</div>`;
       left.appendChild(img); left.appendChild(meta);
       const right = document.createElement('div');
       const joinBtn = document.createElement('button'); joinBtn.className='btn secondary'; joinBtn.textContent='Join';
@@ -270,20 +264,40 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     if(j.success){ await loadRooms(); openRoom(j.roomId, name); socket.emit('roomsUpdated'); } else alert(j.message || 'Create failed');
   };
 
+  // Manage dialog: a simple series of prompts to set fields & ban/unban
   function openRoomManageDialog(roomId, roomObj){
-    const fileInput = document.createElement('input'); fileInput.type='file'; fileInput.accept='image/*';
-    fileInput.onchange = async ()=>{
-      if(!fileInput.files || fileInput.files.length===0) return;
-      const fd = new FormData(); fd.append('pfp', fileInput.files[0]); fd.append('roomId', roomId);
-      const res = await fetch('/update-room-pfp',{ method:'POST', body: fd });
-      const j = await res.json();
-      if(j.success) { alert('Room image updated'); loadRooms(); }
-      else alert(j.message || 'Failed');
-    };
-    const url = prompt('Paste image URL to set as room image (leave empty to choose a file):');
-    if(url && url.trim()) {
-      fetch('/update-room-pfp',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ roomId, pfpUrl: url.trim() }) }).then(r=>r.json()).then(j=>{ if(j.success){ alert('Room image updated'); loadRooms(); } else alert(j.message||'Failed'); });
-    } else fileInput.click();
+    const action = prompt(`Manage room "${roomObj.name}". Choose action:\n1) Rename\n2) Set description\n3) Set privacy (public/friends/invite)\n4) Set posting permissions (any/friends/owner)\n5) Set pfp URL\n6) Upload pfp file\n7) Ban user\n8) Unban user\n9) Kick user\nEnter number:`);
+    if(!action) return;
+    switch(action.trim()){
+      case '1': {
+        const v = prompt('New room name:', roomObj.name); if(v) fetch('/room-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ roomId, action:'setName', value: v })}).then(()=>loadRooms()); break;
+      }
+      case '2': {
+        const v = prompt('Description:', roomObj.description||''); if(v!==null) fetch('/room-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ roomId, action:'setDescription', value: v })}).then(()=>loadRooms()); break;
+      }
+      case '3': {
+        const v = prompt('Privacy (public / friends / invite):', roomObj.privacy||'public'); if(v) fetch('/room-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ roomId, action:'setPrivacy', value: v })}).then(()=>loadRooms()); break;
+      }
+      case '4': {
+        const v = prompt('Posting permission (any / friends / owner):', roomObj.canPost||'any'); if(v) fetch('/room-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ roomId, action:'setCanPost', value: v })}).then(()=>loadRooms()); break;
+      }
+      case '5': {
+        const v = prompt('PFP URL:'); if(v) fetch('/room-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ roomId, action:'setPfp', value: v })}).then(()=>loadRooms()); break;
+      }
+      case '6': {
+        const input = document.createElement('input'); input.type='file'; input.accept='image/*'; input.onchange = async ()=>{ if(!input.files || !input.files[0]) return; const fd = new FormData(); fd.append('pfp', input.files[0]); fd.append('roomId', roomId); const res = await fetch('/update-room-pfp', { method:'POST', body: fd }); const j = await res.json(); if(j.success) { alert('Uploaded'); loadRooms(); } else alert(j.message||'Failed'); }; input.click(); break;
+      }
+      case '7': {
+        const v = prompt('Username to ban:'); if(v) fetch('/room-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ roomId, action:'ban', target: v })}).then(()=>loadRooms()); break;
+      }
+      case '8': {
+        const v = prompt('Username to unban:'); if(v) fetch('/room-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ roomId, action:'unban', target: v })}).then(()=>loadRooms()); break;
+      }
+      case '9': {
+        const v = prompt('Username to kick:'); if(v) fetch('/room-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ roomId, action:'kick', target: v })}).then(()=>loadRooms()); break;
+      }
+      default: break;
+    }
   }
 
   // ---------- DMs ----------
@@ -300,15 +314,18 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     });
   }
 
-  // ---------- CHAT ----------
+  // ---------- CHAT UI ----------
+  function formatDate(ts){ const d = new Date(ts||Date.now()); const optsTime = { hour:'numeric', minute:'2-digit' }; const timeStr = d.toLocaleTimeString([], optsTime); return `${timeStr}, ${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`; }
+
   function setChatHeaderRoom(id, name, pfp) {
     chatTitle.innerHTML = `<img src="${pfp||'/room_pfps/default.png'}" style="width:32px;height:32px;border-radius:6px;margin-right:8px"><span># ${name}</span>`;
   }
 
   async function openRoom(id, name){
-    current = { type:'room', id };
+    current = { type:'room', id, roomOwner: null };
     const info = await api(`/room-info/${id}`);
     setChatHeaderRoom(id, name, (info && info.success) ? info.pfp : '/room_pfps/default.png');
+    if(info && info.success) current.roomOwner = info.owner;
     chatMessages.innerHTML = '';
     chatOverlay.classList.remove('hidden'); chatOverlay.setAttribute('aria-hidden','false');
     socket.emit('joinRoom',{ roomId: id });
@@ -325,27 +342,34 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     loadDMList();
   }
 
-  function formatDate(ts){
-    const d = new Date(ts||Date.now());
-    const optsTime = { hour: 'numeric', minute: '2-digit' };
-    const timeStr = d.toLocaleTimeString([], optsTime);
-    return `${timeStr}, ${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`;
-  }
-
   function createMessageElement(m){
     const el = document.createElement('div'); el.className = 'chat-message' + (m.sender===me ? ' me' : '');
     el.dataset.msgid = m.id;
     const av = document.createElement('img'); av.src = m.avatar||'/avatars/default.png'; av.className='pfp';
     const bubble = document.createElement('div'); bubble.className='bubble';
     bubble.innerHTML = `<div style="font-size:12px;color:var(--muted)">${m.sender} • ${formatDate(m.time)}</div><div style="margin-top:6px">${escapeHtml(m.message||'')}</div>`;
-    // actions: edit/delete for own or admin
-    if(m.sender === me || isAdmin) {
+    // actions: edit/delete if allowed: sender, admin, or room owner for rooms
+    let allowDelete = (m.sender === me) || isAdmin;
+    if(current?.type === 'room' && current.roomOwner) {
+      if(current.roomOwner === me) allowDelete = true;
+    }
+    if(allowDelete) {
       const actions = document.createElement('div'); actions.className='actions';
       actions.innerHTML = `<span data-act="edit" style="cursor:pointer">Edit</span><span data-act="delete" style="cursor:pointer">Delete</span>`;
-      actions.onclick = async (e)=>{
+      actions.onclick = async (e)=> {
         const act = e.target.dataset.act;
-        if(act === 'edit'){ const newMsg = prompt('Edit message:', m.message); if(newMsg!==null) { await fetch('/edit-message',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: m.id, newMsg, dmWith: current?.type==='dm' ? current.id : undefined, roomId: current?.type==='room' ? current.id : undefined }) }); } }
-        if(act === 'delete'){ if(confirm('Delete message?')) { await fetch('/delete-message',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: m.id, dmWith: current?.type==='dm' ? current.id : undefined, roomId: current?.type==='room' ? current.id : undefined }) }); const found = chatMessages.querySelector(`[data-msgid="${m.id}"]`); if(found) found.remove(); } }
+        if(act === 'edit') {
+          const newMsg = prompt('Edit message:', m.message);
+          if(newMsg !== null) {
+            await fetch('/edit-message',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: m.id, newMsg, dmWith: current?.type==='dm' ? current.id : undefined, roomId: current?.type==='room' ? current.id : undefined })});
+          }
+        }
+        if(act === 'delete') {
+          if(confirm('Delete message?')) {
+            await fetch('/delete-message',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id: m.id, dmWith: current?.type==='dm' ? current.id : undefined, roomId: current?.type==='room' ? current.id : undefined })});
+            const found = chatMessages.querySelector(`[data-msgid="${m.id}"]`); if(found) found.remove();
+          }
+        }
       };
       bubble.appendChild(actions);
     }
@@ -353,17 +377,16 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
     return el;
   }
 
-  // Append with temp replacement behavior
   function appendMessage(m){
     if(!m || !m.id) return;
+    // if server sent a tempId to replace optimistic message
     if(m.tempId) {
       const optimistic = chatMessages.querySelector(`[data-msgid="${m.tempId}"]`);
       if(optimistic) {
         optimistic.dataset.msgid = m.id;
         const bubble = optimistic.querySelector('.bubble');
         if(bubble) bubble.innerHTML = `<div style="font-size:12px;color:var(--muted)">${m.sender} • ${formatDate(m.time)}</div><div style="margin-top:6px">${escapeHtml(m.message||'')}</div>`;
-        const img = optimistic.querySelector('img.pfp');
-        if(img && m.avatar) img.src = m.avatar;
+        const img = optimistic.querySelector('img.pfp'); if(img && m.avatar) img.src = m.avatar;
         chatMessages.scrollTop = chatMessages.scrollHeight;
         return;
       }
@@ -392,24 +415,39 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
   sendBtn.onclick = sendMessage;
   chatInput.addEventListener('keydown', e=>{ if(e.key === 'Enter') sendMessage(); });
 
+  // close button fixed: hides overlay, leaves room client-side logic
+  function closeChat() {
+    // if we were in a room we can emit a leave if wanted (server does not require it)
+    if(current?.type === 'room') {
+      socket.emit('leaveRoom', { roomId: current.id });
+    }
+    current = null;
+    chatOverlay.classList.add('hidden');
+    chatOverlay.setAttribute('aria-hidden','true');
+    chatMessages.innerHTML = '';
+  }
+  closeChatBtn.onclick = closeChat;
+  // ESC closes
+  document.addEventListener('keydown', (e)=> { if(e.key === 'Escape') closeChat(); });
+  // clicking outside the chat window closes
+  chatOverlay.addEventListener('click', (e)=> { if(e.target === chatOverlay) closeChat(); });
+
   // socket events
   socket.on('chatHistory', msgs => { chatMessages.innerHTML = ''; (msgs||[]).forEach(m => appendMessage(m)); });
   socket.on('roomMessage', m => { if(current?.type==='room' && current.id === m.roomId) appendMessage(m); });
   socket.on('dmMessage', m => {
     if(current?.type==='dm' && (current.id === m.sender || current.id === m.to)) appendMessage(m);
     else {
-      // mark unread and add badge
       const other = (m.sender === me) ? m.to : m.sender;
       unreadDMs.add(other);
       loadDMList();
       const curr = parseInt(inboxBadge.textContent||'0')||0; showBadge(curr+1);
     }
   });
-  socket.on('inboxUpdate', ()=> { if(inboxPanel.style.display !== 'none') loadInbox(); else { const curr = parseInt(inboxBadge.textContent||'0')||0; showBadge(curr+1); } });
   socket.on('kickedFromRoom', ({roomId, by, reason}) => {
     if(current?.type==='room' && current.id === roomId) {
       alert(`You were removed from the room by ${by}${reason?(' ('+reason+')'):''}`);
-      chatOverlay.classList.add('hidden'); chatOverlay.setAttribute('aria-hidden','true'); current = null;
+      closeChat();
     }
   });
   socket.on('friendsUpdate', ()=>{ loadFriendsAndRecent(); loadDMList(); });
