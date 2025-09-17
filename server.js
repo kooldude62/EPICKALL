@@ -16,6 +16,7 @@ const __dirname = path.dirname(__filename);
 const DATA_FILE = path.join(__dirname, "data.json");
 const AVATAR_DIR = path.join(__dirname, "public", "avatars");
 const ROOM_PFP_DIR = path.join(__dirname, "public", "room_pfps");
+
 if (!fs.existsSync(AVATAR_DIR)) fs.mkdirSync(AVATAR_DIR, { recursive: true });
 if (!fs.existsSync(ROOM_PFP_DIR)) fs.mkdirSync(ROOM_PFP_DIR, { recursive: true });
 
@@ -39,6 +40,7 @@ function loadData() {
 function saveData() {
   try { fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), "utf8"); } catch (e) { console.error("Failed to save data.json", e); }
 }
+
 const store = loadData();
 
 function genId() { return crypto.randomBytes(6).toString("hex"); }
@@ -83,7 +85,7 @@ app.post("/signup", async (req, res) => {
     friends: [],
     createdAt: Date.now(),
     admin: false,
-    dmPrivacy: "any" // any | friends | noone
+    dmPrivacy: "any"
   };
   store.friendRequests[username] = store.friendRequests[username] || [];
   store.notifications[username] = store.notifications[username] || [];
@@ -137,35 +139,6 @@ app.post("/update-avatar", requireAuth, upload.single("avatar"), (req, res) => {
   res.json({ success:true, avatar: avatarUrl });
 });
 
-/* ---------- Profile ---------- */
-app.post("/set-profile", requireAuth, (req,res) => {
-  const u = store.users[req.session.user];
-  if(!u) return res.json({ success:false });
-  const { displayName, bio, dmPrivacy } = req.body;
-  if(typeof displayName === "string") u.displayName = displayName.slice(0,64);
-  if(typeof bio === "string") u.bio = bio.slice(0,300);
-  if(["any","friends","noone"].includes(dmPrivacy)) u.dmPrivacy = dmPrivacy;
-  saveData();
-  res.json({ success:true });
-});
-
-/* ---------- Blocking ---------- */
-app.post("/block", requireAuth, (req,res)=> {
-  const who = req.session.user, target = req.body.target;
-  if(!target || !store.users[target]) return res.json({ success:false, message:"User not found" });
-  store.blocks[who] = store.blocks[who] || [];
-  if(!store.blocks[who].includes(target)) store.blocks[who].push(target);
-  saveData();
-  res.json({ success:true });
-});
-app.post("/unblock", requireAuth, (req,res)=> {
-  const who = req.session.user, target = req.body.target;
-  store.blocks[who] = store.blocks[who] || [];
-  store.blocks[who] = store.blocks[who].filter(x=>x!==target);
-  saveData();
-  res.json({ success:true });
-});
-
 /* ---------- Friends ---------- */
 app.get("/friends", requireAuth, (req, res) => {
   const username = req.session.user;
@@ -212,15 +185,15 @@ app.post("/accept-request", requireAuth, (req,res) => {
   res.json({ success:true });
 });
 
-/* ---------- Rooms ---------- */
+/* ---------- Rooms (privacy + invited) ---------- */
 /*
-room schema additions:
-  owner, pfp, description, privacy: public|friends|invite, canPost: any|friends|owner, banned: []
+room schema:
+  owner, pfp, description, privacy: public|friends|invite, canPost: any|friends|owner, banned: [], invited: []
 */
 app.get("/rooms", requireAuth, (req,res) => {
   const result = {};
   for(const [id,r] of Object.entries(store.rooms || {})) {
-    result[id] = { name: r.name, inviteOnly: !!r.inviteOnly, owner: r.owner||null, pfp: r.pfp||"/room_pfps/default.png", description: r.description||"", privacy: r.privacy||"public", canPost: r.canPost||"any", banned: r.banned||[] };
+    result[id] = { name: r.name, inviteOnly: !!r.inviteOnly, owner: r.owner||null, pfp: r.pfp||"/room_pfps/default.png", description: r.description||"", privacy: r.privacy||"public", canPost: r.canPost||"any", banned: r.banned||[], invited: r.invited||[] };
   }
   res.json(result);
 });
@@ -231,7 +204,7 @@ app.post("/create-room", requireAuth, (req,res) => {
   const lower = name.trim().toLowerCase();
   for(const r of Object.values(store.rooms||{})) if(r.name?.trim().toLowerCase()===lower) return res.json({ success:false, message:"Room name already in use" });
   const id = genId();
-  store.rooms[id] = { name: name.trim(), password: password||"", inviteOnly: !!inviteOnly, users: [], messages: [], owner: req.session.user, pfp: "/room_pfps/default.png", description: "", privacy:"public", canPost:"any", banned: [] };
+  store.rooms[id] = { name: name.trim(), password: password||"", inviteOnly: !!inviteOnly, users: [], messages: [], owner: req.session.user, pfp: "/room_pfps/default.png", description: "", privacy:"public", canPost:"any", banned: [], invited: [] };
   saveData();
   io.emit("roomsUpdated");
   res.json({ success:true, roomId:id, inviteLink: `${req.protocol}://${req.get("host")}/?invite=${id}` });
@@ -240,10 +213,9 @@ app.post("/create-room", requireAuth, (req,res) => {
 app.get("/room-info/:roomId", requireAuth, (req,res) => {
   const r = store.rooms[req.params.roomId];
   if(!r) return res.json({ success:false });
-  res.json({ success:true, name:r.name, owner: r.owner||null, pfp: r.pfp||"/room_pfps/default.png", description: r.description||"", privacy: r.privacy||"public", canPost: r.canPost||"any", banned: r.banned||[] });
+  res.json({ success:true, name:r.name, owner: r.owner||null, pfp: r.pfp||"/room_pfps/default.png", description: r.description||"", privacy: r.privacy||"public", canPost: r.canPost||"any", banned: r.banned||[], invited: r.invited||[] });
 });
 
-/* upload room pfp */
 app.post("/update-room-pfp", requireAuth, upload.single("pfp"), (req,res) => {
   const username = req.session.user;
   const roomId = req.body.roomId;
@@ -264,7 +236,7 @@ app.post("/update-room-pfp", requireAuth, upload.single("pfp"), (req,res) => {
   res.json({ success:true, pfp: room.pfp });
 });
 
-/* endpoint for room owner customizations: kick, ban, unban, setName, setDesc, setPrivacy, setCanPost */
+/* room actions: kick, ban, unban, setName, setDescription, setPrivacy, setCanPost, invite, revoke-invite */
 app.post("/room-action", requireAuth, (req,res) => {
   const user = req.session.user;
   const { roomId, action, target, value } = req.body;
@@ -318,6 +290,22 @@ app.post("/room-action", requireAuth, (req,res) => {
   if(action === "setPfp") {
     if(typeof value === "string") { room.pfp = value; saveData(); io.emit("roomsUpdated"); return res.json({ success:true }); }
   }
+  if(action === "invite") {
+    room.invited = room.invited || [];
+    if(!room.invited.includes(target)) room.invited.push(target);
+    saveData();
+    const note = addNotification(target, "room_invite", { roomId, by: user, roomName: room.name });
+    io.to(target).emit("inboxUpdate", note);
+    io.to(target).emit("roomInvite", { roomId, by: user, roomName: room.name });
+    io.emit("roomsUpdated");
+    return res.json({ success:true });
+  }
+  if(action === "revoke-invite") {
+    room.invited = (room.invited||[]).filter(x => x !== target);
+    saveData();
+    io.emit("roomsUpdated");
+    return res.json({ success:true });
+  }
 
   res.json({ success:false, message:"Unknown action" });
 });
@@ -331,7 +319,7 @@ app.get("/dm/:friend", requireAuth, (req,res) => {
   res.json({ success:true, messages: store.dms[key] || [] });
 });
 
-/* ---------- inbox ---------- */
+/* ---------- Inbox ---------- */
 app.get("/inbox", requireAuth, (req,res) => {
   const u = req.session.user;
   res.json({ success:true, notifications: store.notifications[u] || [] });
@@ -352,7 +340,6 @@ app.post("/edit-message", requireAuth, (req,res) => {
   if(roomId && store.rooms[roomId]) {
     const msg = (store.rooms[roomId].messages || []).find(m => m.id === id);
     if(!msg) return res.json({ success:false });
-    // allow if sender OR admin OR room owner
     if(msg.sender !== user && !store.users[user].admin && store.rooms[roomId].owner !== user) return res.json({ success:false });
     msg.message = newMsg;
     saveData();
@@ -380,7 +367,6 @@ app.post("/delete-message", requireAuth, (req,res) => {
     const idx = (store.rooms[roomId].messages || []).findIndex(m => m.id === id);
     if(idx === -1) return res.json({ success:false });
     const msg = store.rooms[roomId].messages[idx];
-    // allow if sender OR admin OR room owner
     if(msg.sender !== user && !store.users[user].admin && store.rooms[roomId].owner !== user) return res.json({ success:false });
     store.rooms[roomId].messages.splice(idx, 1);
     saveData();
@@ -403,7 +389,7 @@ app.post("/delete-message", requireAuth, (req,res) => {
   res.json({ success:false });
 });
 
-/* ---------- basic rate-limiting ---------- */
+/* ---------- rate-limiting ---------- */
 function allowMessage(sender) {
   const now = Date.now();
   store.rateLimits[sender] = store.rateLimits[sender] || [];
@@ -426,8 +412,37 @@ io.on("connection", (socket) => {
   socket.on("joinRoom", ({ roomId }) => {
     if(!roomId || !store.rooms[roomId]) return;
     const room = store.rooms[roomId];
+
+    // BANNED check
     if((room.banned||[]).includes(socket.username)) { socket.emit("kickedFromRoom", { roomId, reason: "banned" }); return; }
+
+    // PRIVACY logic
+    const privacy = room.privacy || "public";
+    const owner = room.owner;
+    const isOwner = owner === socket.username;
+    const isAdmin = store.users[socket.username]?.admin;
+
+    if(privacy === "friends") {
+      // allow if friend of owner, the owner, or admin
+      const ownerFriends = (store.users[owner]?.friends || []);
+      if(!(isOwner || isAdmin || ownerFriends.includes(socket.username))) {
+        socket.emit("joinDenied", { roomId, reason: "friends-only" });
+        return;
+      }
+    }
+    if(privacy === "invite") {
+      room.invited = room.invited || [];
+      if(!(isOwner || isAdmin || room.invited.includes(socket.username))) {
+        socket.emit("joinDenied", { roomId, reason: "invite-only" });
+        return;
+      }
+    }
+
+    // join
     socket.join(roomId);
+    room.users = room.users || [];
+    if(!room.users.includes(socket.username)) room.users.push(socket.username);
+    saveData();
     const messages = room.messages || [];
     socket.emit("chatHistory", messages);
   });
@@ -435,14 +450,16 @@ io.on("connection", (socket) => {
   socket.on("roomMessage", ({ roomId, message }) => {
     const sender = socket.username;
     if(!sender || !roomId || !store.rooms[roomId] || !message) return;
-    // prevent empty
     const text = ("" + message).trim();
     if(!text) return;
     if(!allowMessage(sender)) { socket.emit("rateLimited", { message: "Too many messages" }); return; }
+
     const room = store.rooms[roomId];
-    // enforce canPost: any | friends | owner
+
+    // posting permissions
     if(room.canPost === "owner" && room.owner !== sender && !store.users[sender]?.admin) { socket.emit("postDenied", { message: "Only owner can post" }); return; }
     if(room.canPost === "friends" && !(store.users[room.owner].friends || []).includes(sender) && room.owner !== sender && !store.users[sender]?.admin) { socket.emit("postDenied", { message: "Only friends of owner can post" }); return; }
+
     const msgObj = { id: genId(), sender, avatar: store.users[sender]?.avatar || "/avatars/default.png", message: text, time: Date.now(), roomId };
     room.messages = room.messages || [];
     room.messages.push(msgObj);
@@ -467,7 +484,7 @@ io.on("connection", (socket) => {
     const emitMsg = Object.assign({}, msg);
     if(tempId) emitMsg.tempId = tempId;
     io.to(to).emit("dmMessage", emitMsg);
-    io.to(from).emit("dmMessage", emitMsg); // ensures sender gets authoritative id/time
+    io.to(from).emit("dmMessage", emitMsg);
     const note = addNotification(to, "dm", { from, preview: text.slice(0,120) });
     io.to(to).emit("inboxUpdate", note);
     io.to(to).emit("dmNotification", { from });
@@ -479,30 +496,10 @@ io.on("connection", (socket) => {
     const room = store.rooms[roomId];
     const isOwner = room.owner === user || store.users[user]?.admin;
     if(!isOwner) { socket.emit("roomCommandFailed", { message: "Not allowed" }); return; }
-    if(action === "kick") {
-      io.to(target).emit("kickedFromRoom", { roomId, by: user });
-      return;
-    }
-    if(action === "ban") {
-      room.banned = room.banned || [];
-      if(!room.banned.includes(target)) room.banned.push(target);
-      saveData();
-      io.to(target).emit("kickedFromRoom", { roomId, by: user, reason: "banned" });
-      io.emit("roomsUpdated");
-      return;
-    }
-    if(action === "unban") {
-      room.banned = (room.banned||[]).filter(x=>x!==target);
-      saveData();
-      io.emit("roomsUpdated");
-      return;
-    }
-    if(action === "setpfp" && pfpUrl) {
-      room.pfp = pfpUrl;
-      saveData();
-      io.emit("roomsUpdated");
-      return;
-    }
+    if(action === "kick") { io.to(target).emit("kickedFromRoom", { roomId, by: user }); return; }
+    if(action === "ban") { room.banned = room.banned || []; if(!room.banned.includes(target)) room.banned.push(target); saveData(); io.to(target).emit("kickedFromRoom", { roomId, by: user, reason: "banned" }); io.emit("roomsUpdated"); return; }
+    if(action === "unban") { room.banned = (room.banned||[]).filter(x=>x!==target); saveData(); io.emit("roomsUpdated"); return; }
+    if(action === "setpfp" && pfpUrl) { room.pfp = pfpUrl; saveData(); io.emit("roomsUpdated"); return; }
   });
 
   socket.on("sendFriendRequest", (to) => {
