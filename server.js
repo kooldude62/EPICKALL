@@ -19,6 +19,12 @@ const ROOM_PFP_DIR = path.join(__dirname, "public", "room_pfps");
 
 if (!fs.existsSync(AVATAR_DIR)) fs.mkdirSync(AVATAR_DIR, { recursive: true });
 if (!fs.existsSync(ROOM_PFP_DIR)) fs.mkdirSync(ROOM_PFP_DIR, { recursive: true });
+const admins = process.env.ADMINS ? process.env.ADMINS.split(',') : [];
+
+// Check if user is admin
+function isAdmin(username) {
+  return admins.includes(username);
+}
 
 function loadData() {
   try {
