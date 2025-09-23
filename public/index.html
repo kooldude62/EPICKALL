@@ -150,13 +150,18 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:6px 18px 24px
   const sendBtn = document.getElementById('sendBtn');
   const closeChatBtn = document.getElementById('closeChat');
 
-  function showBadge(n) { if(!n || n<=0) {inboxBadge.style.display='none'} else {inboxBadge.style.display=''; inboxBadge.textContent=String(n);} }
+  function showBadge(n){ inboxBadge.style.display = n>0?'':'none'; if(n>0) inboxBadge.textContent=String(n);}
   function showInboxPanel(show){ inboxPanel.style.display = show ? '' : 'none'; }
 
   inboxBtn.onclick = ()=>{ const visible = inboxPanel.style.display !== 'none'; showInboxPanel(!visible); if(!visible) loadInbox(); };
   markAllReadBtn.onclick = async ()=>{ await fetch('/inbox/mark-read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ id:'all' })}); await loadInbox(); };
 
-  tabs.forEach(tab=>tab.addEventListener('click', ()=>{ tabs.forEach(t=>t.classList.remove('active')); panels.forEach(p=>p.classList.remove('active')); tab.classList.add('active'); document.getElementById(tab.dataset.tab).classList.add('active'); }));
+  tabs.forEach(tab=>tab.addEventListener('click', ()=>{
+    tabs.forEach(t=>t.classList.remove('active'));
+    panels.forEach(p=>p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById(tab.dataset.tab).classList.add('active');
+  }));
 
   document.getElementById('accountBtn').onclick = ()=> location.href = '/account.html';
   document.getElementById('logoutBtn').onclick = async ()=> { await fetch('/logout',{method:'POST'}); location.href = '/login.html'; };
@@ -164,25 +169,35 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:6px 18px 24px
   async function api(path, opts={}) { try { const r = await fetch(path, opts); return await r.json(); } catch (e) { console.error('API error', path, e); return null; } }
 
   async function init(){
-    const meRes = await api('/me');
+    // device ID for device bans
+    let deviceId = localStorage.getItem('deviceId');
+    if(!deviceId){ deviceId = Math.random().toString(36).substring(2); localStorage.setItem('deviceId', deviceId); }
+
+    const meRes = await api('/me?deviceId='+deviceId);
     if(!meRes || !meRes.loggedIn) return location.href = '/login.html';
-    me = meRes.username; isAdmin = !!meRes.admin;
-    if(isAdmin) adminPanelBtn.style.display = '';
+    me = meRes.username;
+    isAdmin = !!meRes.admin;
+    if(isAdmin){
+      adminPanelBtn.style.display = '';
+      adminPanelBtn.onclick = ()=> location.href = '/admin.html';
+    }
+    if(meRes.banned){ alert('You are banned!'); return; }
+    
     socket.emit('registerUser', me);
     await Promise.all([loadFriendsAndRecent(), loadRooms(), loadDMList()]);
     await loadInbox();
   }
 
-  // ---------- FRIENDS/RECENT/DMS rendering with admin star ----------
-  function renderUserWithAdmin(user) {
+  function renderUserWithAdmin(user){
     const el = document.createElement('div'); el.className='list-item';
     const star = user.admin ? `<img class="admin-star" src="https://i.imgur.com/ZuNPcZZ.png" alt="admin">` : '';
     el.innerHTML = `<div style="display:flex;align-items:center;gap:10px"><img src="${user.avatar||'/avatars/default.png'}" class="pfp"><div>${user.username}</div>${star}</div>`;
     return el;
   }
 
-  async function loadFriendsAndRecent(){
-    const data = await api('/friends'); if(!data) return;
+  async function loadFriendsAndRecent(query=''){
+    const data = await api('/friends'+(query?`?q=${encodeURIComponent(query)}`:''));
+    if(!data) return;
     friendRequestsDiv.innerHTML = '';
     (data.requests||[]).forEach(r=>{
       const el = document.createElement('div'); el.className='list-item';
@@ -208,26 +223,57 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:6px 18px 24px
     });
   }
 
+  document.getElementById('searchBtn').onclick = async ()=> {
+    const q = document.getElementById('searchUser').value;
+    await loadFriendsAndRecent(q);
+  };
+
+  async function loadRooms(){
+    const data = await api('/rooms');
+    roomsListDiv.innerHTML = '';
+    (data.rooms||[]).forEach(r=>{
+      const el = document.createElement('div'); el.className='list-item';
+      el.innerHTML = `<div style="display:flex;align-items:center"><img src="${r.avatar||'/avatars/default.png'}" class="room-pfp"><div>${r.name}</div></div>`;
+      el.onclick = ()=> joinRoom(r.name);
+      roomsListDiv.appendChild(el);
+    });
+  }
+
   async function loadDMList(){
-    const data = await api('/friends'); if(!data) return;
+    const data = await api('/friends');
+    if(!data) return;
     dmListDiv.innerHTML = '';
     let friends = (data.friends||[]).map(f=>({ ...f, unread: unreadDMs.has(f.username) }));
     friends.sort((a,b)=> (b.unread?1:0) - (a.unread?1:0));
     friends.forEach(f=>{
       const el = renderUserWithAdmin(f);
-      if(f.unread) {
-        const dot = document.createElement('div'); dot.className='unread-dot';
-        el.querySelector('div').appendChild(dot);
-      }
+      if(f.unread){ const dot = document.createElement('div'); dot.className='unread-dot'; el.querySelector('div').appendChild(dot); }
       el.onclick = ()=> openDM(f.username);
       dmListDiv.appendChild(el);
     });
   }
 
-  // other functions remain identical (chat, rooms, inbox, socket events, sendMessage, etc.)
+  function openDM(username){
+    chatOverlay.classList.remove('hidden');
+    chatTitle.textContent = username;
+    current = username;
+    chatMessages.innerHTML = '';
+  }
+
+  closeChatBtn.onclick = ()=> chatOverlay.classList.add('hidden');
+  sendBtn.onclick = sendMessage;
+  chatInput.onkeypress = e=>{ if(e.key==='Enter') sendMessage(); };
+
+  async function sendMessage(){
+    if(!current) return;
+    const text = chatInput.value.trim(); if(!text) return;
+    chatInput.value = '';
+    await api('/send-message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ to: current, message: text })});
+    const msg = document.createElement('div'); msg.className='chat-message me'; msg.innerHTML=`<div class="bubble"><div class="meta">${me}</div><div>${text}</div></div>`;
+    chatMessages.appendChild(msg); chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
 
   await init();
-
 })();
 </script>
 </body>
