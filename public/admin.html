@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Admin Panel</title>
+  <style>
+    body { font-family: Arial; background:#111; color:#fff; padding:20px; }
+    .user { margin-bottom:8px; }
+    button { margin-left:6px; background:#6b8cff; border:none; border-radius:4px; padding:4px 8px; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <h1>Admin Panel</h1>
+  <div id="users"></div>
+  <script>
+    async function api(path, opts={}) {
+      const res = await fetch(path, {
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        ...opts,
+      });
+      return res.json();
+    }
+
+    async function init() {
+      const meRes = await api("/me");
+      if (!meRes.loggedIn || !meRes.admin) {
+        alert("Access denied");
+        return location.href = "/";
+      }
+      loadUsers();
+    }
+
+    async function loadUsers() {
+      const data = await api("/admin/users");
+      const cont = document.getElementById("users");
+      cont.innerHTML = "";
+      for (const [name, info] of Object.entries(data.users)) {
+        const div = document.createElement("div");
+        div.className = "user";
+        div.innerHTML = `<b>${name}</b> ${info.admin ? "(Admin)" : ""} ${info.banned ? "(Banned)" : ""}`;
+        if (!info.banned) {
+          const banBtn = document.createElement("button");
+          banBtn.textContent = "Ban";
+          banBtn.onclick = async () => {
+            await api("/admin/ban", { method:"POST", body: JSON.stringify({ username:name }) });
+            loadUsers();
+          };
+          div.appendChild(banBtn);
+        }
+        cont.appendChild(div);
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
