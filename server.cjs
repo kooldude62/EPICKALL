@@ -6,170 +6,250 @@ const { Server } = require("socket.io");
 const io = new Server(server);
 const session = require("express-session");
 const bodyParser = require("body-parser");
-const fs = require("fs");
 const path = require("path");
+const fs = require("fs");
 
 const PORT = process.env.PORT || 3000;
 const ADMIN_USERS = process.env.ADMIN_USERS ? process.env.ADMIN_USERS.split(",") : [];
 
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, "public")));
-app.use(session({ secret: process.env.SESSION_SECRET || "secret", resave: false, saveUninitialized: true }));
 
-// --- Storage ---
-const USERS_FILE = path.join(__dirname,"data/users.json");
-const ROOMS_FILE = path.join(__dirname,"data/rooms.json");
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "secret",
+    resave: false,
+    saveUninitialized: true,
+  })
+);
 
-let users = fs.existsSync(USERS_FILE) ? JSON.parse(fs.readFileSync(USERS_FILE)) : {};
-let rooms = fs.existsSync(ROOMS_FILE) ? JSON.parse(fs.readFileSync(ROOMS_FILE)) : {};
-let messages = []; // {id, from, to, room, text, timestamp}
+const USERS_FILE = path.join(__dirname, "storage/users.json");
+const ROOMS_FILE = path.join(__dirname, "storage/rooms.json");
 
-// --- Helpers ---
-function saveUsers() { fs.writeFileSync(USERS_FILE, JSON.stringify(users,null,2)); }
-function saveRooms() { fs.writeFileSync(ROOMS_FILE, JSON.stringify(rooms,null,2)); }
-
-function requireLogin(req,res,next){
-    if(!req.session.user) return res.status(401).json({success:false});
-    next();
+// Load JSON safely
+function loadJSON(file, defaultData) {
+  try {
+    if (!fs.existsSync(file)) fs.writeFileSync(file, JSON.stringify(defaultData, null, 2));
+    return JSON.parse(fs.readFileSync(file));
+  } catch (e) {
+    console.error(`Error loading ${file}:`, e);
+    return defaultData;
+  }
 }
-function requireAdmin(req,res,next){
-    if(!req.session.user?.admin) return res.status(403).json({success:false,message:"Admin only"});
-    next();
+
+// Save JSON
+function saveJSON(file, data) {
+  fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
 
-// --- Auth ---
-app.post("/signup",(req,res)=>{
-    const {username,password,bio} = req.body;
-    if(users[username]) return res.json({success:false,message:"User exists"});
-    users[username] = {password,friends:[],requests:[],banned:false,admin:ADMIN_USERS.includes(username),avatar:"/avatars/default.png",bio:bio||""};
-    req.session.user = {username,admin:users[username].admin};
-    saveUsers();
-    res.json({success:true});
+let users = loadJSON(USERS_FILE, {});   // username -> {password, friends, requests, avatar, bio, banned, admin}
+let rooms = loadJSON(ROOMS_FILE, {});   // roomName -> {owner, users: []}
+let messages = []; // in-memory messages
+
+// Middleware
+function requireLogin(req, res, next) {
+  if (!req.session.user) return res.status(401).json({ success: false });
+  next();
+}
+
+function requireAdmin(req, res, next) {
+  if (!req.session.user || !req.session.user.admin) {
+    return res.status(403).json({ success: false, message: "Admin only" });
+  }
+  next();
+}
+
+// Auth routes
+app.post("/signup", (req, res) => {
+  const { username, password, avatar, bio } = req.body;
+  if (!username || !password) return res.json({ success: false, message: "Missing fields" });
+  if (users[username]) return res.json({ success: false, message: "User exists" });
+
+  users[username] = {
+    password,
+    friends: [],
+    requests: [],
+    avatar: avatar || "/default.png",
+    bio: bio || "",
+    banned: false,
+    admin: ADMIN_USERS.includes(username),
+  };
+
+  saveJSON(USERS_FILE, users);
+  req.session.user = { username, admin: users[username].admin };
+  res.json({ success: true });
 });
 
-app.post("/login",(req,res)=>{
-    const {username,password} = req.body;
-    const u = users[username];
-    if(!u||u.password!==password) return res.json({success:false,message:"Invalid credentials"});
-    if(u.banned) return res.json({success:false,message:"Banned"});
-    req.session.user = {username,admin:u.admin};
-    res.json({success:true});
+app.post("/login", (req, res) => {
+  const { username, password } = req.body;
+  const user = users[username];
+  if (!user || user.password !== password) return res.json({ success: false, message: "Invalid credentials" });
+  if (user.banned) return res.json({ success: false, message: "Banned" });
+
+  req.session.user = { username, admin: user.admin };
+  res.json({ success: true });
 });
 
-app.post("/logout",requireLogin,(req,res)=>{ req.session.destroy(()=>res.json({success:true})); });
-
-app.get("/me",(req,res)=>{
-    if(!req.session.user) return res.json({loggedIn:false});
-    const u = users[req.session.user.username];
-    res.json({loggedIn:true,username:req.session.user.username,admin:u.admin,bio:u.bio,avatar:u.avatar,banned:u.banned});
+app.post("/logout", requireLogin, (req, res) => {
+  req.session.destroy(() => res.json({ success: true }));
 });
 
-// --- Friend system ---
-app.post("/friend-request",requireLogin,(req,res)=>{
-    const from = req.session.user.username;
-    const to = req.body.to;
-    if(from===to) return res.json({success:false,message:"Cannot friend yourself"});
-    if(!users[to]) return res.json({success:false,message:"User not found"});
-    if(users[from].friends.includes(to)||users[to].requests.includes(from)) return res.json({success:false,message:"Already friends or request pending"});
-    users[to].requests.push(from);
-    saveUsers();
-    res.json({success:true});
+app.get("/me", (req, res) => {
+  if (!req.session.user) return res.json({ loggedIn: false });
+  const u = users[req.session.user.username];
+  res.json({
+    loggedIn: true,
+    username: req.session.user.username,
+    admin: u.admin,
+    avatar: u.avatar,
+    bio: u.bio,
+    friends: u.friends,
+  });
 });
 
-app.post("/accept-request",requireLogin,(req,res)=>{
-    const me = req.session.user.username;
-    const from = req.body.from;
-    if(!users[me].requests.includes(from)) return res.json({success:false,message:"No request"});
-    users[me].requests = users[me].requests.filter(u=>u!==from);
-    users[me].friends.push(from);
-    users[from].friends.push(me);
-    saveUsers();
-    res.json({success:true});
+// Friend system
+app.get("/friends", requireLogin, (req, res) => {
+  const me = users[req.session.user.username];
+  const recent = Object.values(users)
+    .filter(u => u !== me && !me.friends.includes(u.username) && !me.requests.includes(u.username))
+    .map(u => ({ username: u.username, avatar: u.avatar, admin: u.admin }));
+  res.json({ friends: me.friends.map(f => users[f]), requests: me.requests, recent });
 });
 
-// --- Rooms ---
-app.post("/create-room",requireLogin,(req,res)=>{
-    const owner = req.session.user.username;
-    const {name,avatar} = req.body;
-    if(!name) return res.json({success:false,message:"Name required"});
-    if(rooms[name]) return res.json({success:false,message:"Room exists"});
-    rooms[name] = {name,owner,avatar:avatar||"/avatars/default.png",users:[owner]};
-    saveRooms();
-    res.json({success:true});
+app.post("/friend-request", requireLogin, (req, res) => {
+  const fromUser = req.session.user.username;
+  const { to } = req.body;
+  if (!users[to]) return res.json({ success: false, message: "User not found" });
+  if (to === fromUser) return res.json({ success: false, message: "Cannot friend yourself" });
+  if (users[to].requests.includes(fromUser) || users[to].friends.includes(fromUser)) {
+    return res.json({ success: false, message: "Already requested or friends" });
+  }
+
+  users[to].requests.push(fromUser);
+  saveJSON(USERS_FILE, users);
+  res.json({ success: true });
 });
 
-app.post("/join-room",requireLogin,(req,res)=>{
-    const {name} = req.body;
-    if(!rooms[name]) return res.json({success:false,message:"Room not found"});
-    const user = req.session.user.username;
-    if(!rooms[name].users.includes(user)) rooms[name].users.push(user);
-    saveRooms();
-    res.json({success:true});
+app.post("/accept-request", requireLogin, (req, res) => {
+  const me = req.session.user.username;
+  const { from } = req.body;
+  if (!users[from]) return res.json({ success: false, message: "User not found" });
+  users[me].friends.push(from);
+  users[from].friends.push(me);
+  users[me].requests = users[me].requests.filter(r => r !== from);
+  saveJSON(USERS_FILE, users);
+  res.json({ success: true });
 });
 
-app.post("/leave-room",requireLogin,(req,res)=>{
-    const {name} = req.body;
-    if(!rooms[name]) return res.json({success:false,message:"Room not found"});
-    const user = req.session.user.username;
-    rooms[name].users = rooms[name].users.filter(u=>u!==user);
-    saveRooms();
-    res.json({success:true});
+// Profile update
+app.post("/update-profile", requireLogin, (req, res) => {
+  const me = req.session.user.username;
+  const { avatar, bio } = req.body;
+  if (avatar) users[me].avatar = avatar;
+  if (bio) users[me].bio = bio;
+  saveJSON(USERS_FILE, users);
+  res.json({ success: true });
 });
 
-app.post("/manage-room",requireLogin,(req,res)=>{
-    const user = req.session.user.username;
-    const {name,action,target} = req.body;
-    if(!rooms[name]) return res.json({success:false,message:"Room not found"});
-    if(rooms[name].owner!==user) return res.json({success:false,message:"Not owner"});
-    if(action==="kick" && target){ rooms[name].users = rooms[name].users.filter(u=>u!==target); saveRooms(); return res.json({success:true}); }
-    if(action==="delete"){ delete rooms[name]; saveRooms(); return res.json({success:true}); }
-    res.json({success:false,message:"Invalid action"});
+// Rooms
+app.get("/rooms", requireLogin, (req, res) => {
+  const list = Object.keys(rooms).map(rn => ({
+    name: rn,
+    owner: rooms[rn].owner,
+    users: rooms[rn].users,
+  }));
+  res.json({ rooms: list });
 });
 
-// --- Messages ---
-app.post("/send-message",requireLogin,(req,res)=>{
-    const from = req.session.user.username;
-    const {to,room,text} = req.body;
-    const msg = {id:Date.now().toString(),from,to:to||null,room:room||null,text,timestamp:Date.now(),avatar:users[from].avatar};
-    messages.push(msg);
-    io.emit("message",msg);
-    res.json({success:true});
+app.post("/create-room", requireLogin, (req, res) => {
+  const { name } = req.body;
+  if (!name || rooms[name]) return res.json({ success: false, message: "Room exists or invalid" });
+  const owner = req.session.user.username;
+  rooms[name] = { owner, users: [] };
+  saveJSON(ROOMS_FILE, rooms);
+  res.json({ success: true });
 });
 
-app.post("/delete-message",requireLogin,(req,res)=>{
-    const {id} = req.body;
-    const msg = messages.find(m=>m.id===id);
-    if(!msg) return res.json({success:false,message:"Not found"});
-    const user = req.session.user.username;
-    if(user!==msg.from&&!users[user].admin) return res.json({success:false,message:"Not allowed"});
-    messages = messages.filter(m=>m.id!==id);
-    io.emit("deleteMessage",{id});
-    res.json({success:true});
+app.post("/join-room", requireLogin, (req, res) => {
+  const { name } = req.body;
+  if (!rooms[name]) return res.json({ success: false, message: "Room not found" });
+  const user = req.session.user.username;
+  if (!rooms[name].users.includes(user)) rooms[name].users.push(user);
+  saveJSON(ROOMS_FILE, rooms);
+  res.json({ success: true, users: rooms[name].users });
 });
 
-// --- APIs ---
-app.get("/friends",requireLogin,(req,res)=>{
-    const me = req.session.user.username;
-    const friends = users[me].friends.map(u=>({username:u,avatar:users[u].avatar,admin:users[u].admin}));
-    const requests = users[me].requests;
-    const recent = Object.keys(users).filter(u=>u!==me && !users[me].friends.includes(u)).map(u=>({username:u,avatar:users[u].avatar,admin:users[u].admin}));
-    res.json({friends,requests,recent});
+app.post("/leave-room", requireLogin, (req, res) => {
+  const { name } = req.body;
+  if (!rooms[name]) return res.json({ success: false });
+  const user = req.session.user.username;
+  rooms[name].users = rooms[name].users.filter(u => u !== user);
+  saveJSON(ROOMS_FILE, rooms);
+  res.json({ success: true });
 });
 
-app.get("/rooms",requireLogin,(req,res)=>{
-    res.json({rooms:Object.values(rooms)});
+app.post("/manage-room", requireLogin, (req, res) => {
+  const { name, action, target } = req.body;
+  if (!rooms[name]) return res.json({ success: false });
+  const user = req.session.user.username;
+  if (rooms[name].owner !== user) return res.json({ success: false, message: "Only owner" });
+
+  if (action === "kick") {
+    rooms[name].users = rooms[name].users.filter(u => u !== target);
+  } else if (action === "delete") {
+    delete rooms[name];
+  }
+  saveJSON(ROOMS_FILE, rooms);
+  res.json({ success: true });
 });
 
-app.get("/profile/:username",requireLogin,(req,res)=>{
-    const u = users[req.params.username];
-    if(!u) return res.json({success:false,message:"Not found"});
-    res.json({success:true,username:req.params.username,bio:u.bio,avatar:u.avatar,friends:u.friends.length});
+// Messages
+app.post("/send-message", requireLogin, (req, res) => {
+  const { to, room, text } = req.body;
+  const from = req.session.user.username;
+  const msg = {
+    id: Date.now().toString(),
+    from,
+    fromAvatar: users[from].avatar,
+    to: to || null,
+    room: room || null,
+    text,
+    timestamp: Date.now(),
+  };
+  messages.push(msg);
+  io.emit("message", msg);
+  res.json({ success: true });
 });
 
-// --- Socket.io ---
-io.on("connection",(socket)=>{
-    socket.on("registerUser",(username)=>{ socket.username=username; });
+app.post("/delete-message", requireLogin, (req, res) => {
+  const { id } = req.body;
+  const msg = messages.find(m => m.id === id);
+  if (!msg) return res.json({ success: false });
+  const user = req.session.user.username;
+  if (users[user].admin || msg.from === user) {
+    messages = messages.filter(m => m.id !== id);
+    io.emit("deleteMessage", { id });
+    return res.json({ success: true });
+  }
+  res.json({ success: false, message: "Not allowed" });
 });
 
-// --- Server ---
-server.listen(PORT,()=>console.log("Server running on port "+PORT));
+// Admin
+app.get("/admin/users", requireAdmin, (req, res) => res.json({ success: true, users }));
+
+app.post("/admin/ban", requireAdmin, (req, res) => {
+  const { username } = req.body;
+  if (!users[username]) return res.json({ success: false, message: "Not found" });
+  users[username].banned = true;
+  saveJSON(USERS_FILE, users);
+  res.json({ success: true });
+});
+
+// Socket.io
+io.on("connection", (socket) => {
+  socket.on("registerUser", (username) => {
+    socket.username = username;
+  });
+});
+
+server.listen(PORT, () => console.log("Server running on port " + PORT));
