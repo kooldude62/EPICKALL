@@ -23,8 +23,8 @@ app.use(
 );
 
 // In-memory storage
-let users = {};      // username -> { password, friends: [], requests: [], banned, admin }
-let rooms = {};      // roomName -> { users: [] }
+let users = {};      // username -> { password, friends: [], requests: [], banned, admin, avatar, createdAt }
+let rooms = {};      // roomName -> { users: [], owner, avatar }
 let messages = [];   // { id, from, to, room, text, timestamp }
 
 // Middleware
@@ -33,16 +33,13 @@ function requireLogin(req, res, next) {
   next();
 }
 function requireAdmin(req, res, next) {
-  if (!req.session.user || !req.session.user.admin) {
-    return res.status(403).json({ success: false, message: "Admin only" });
-  }
+  if (!req.session.user || !req.session.user.admin) return res.status(403).json({ success: false, message: "Admin only" });
   next();
 }
 
 // Auth routes
 app.post("/signup", (req, res) => {
   const { username, password } = req.body;
-  if (!username || !password) return res.json({ success: false, message: "Missing fields" });
   if (users[username]) return res.json({ success: false, message: "User exists" });
 
   users[username] = {
@@ -51,6 +48,7 @@ app.post("/signup", (req, res) => {
     requests: [],
     banned: false,
     admin: ADMIN_USERS.includes(username),
+    avatar: '/avatars/default.png',
     createdAt: Date.now(),
   };
 
@@ -69,34 +67,42 @@ app.post("/login", (req, res) => {
 });
 
 app.post("/logout", requireLogin, (req, res) => {
-  req.session.destroy();
-  res.json({ success: true });
+  req.session.destroy(() => res.json({ success: true }));
 });
 
 app.get("/me", (req, res) => {
   if (!req.session.user) return res.json({ loggedIn: false });
-  const me = users[req.session.user.username];
+  const user = users[req.session.user.username];
   res.json({
     loggedIn: true,
     username: req.session.user.username,
-    admin: me.admin,
-    banned: me.banned,
+    admin: req.session.user.admin,
+    banned: user.banned,
+    avatar: user.avatar
   });
 });
 
-// Friend system
+// Set avatar
+app.post("/set-avatar", requireLogin, (req, res) => {
+  const { avatar } = req.body;
+  const me = users[req.session.user.username];
+  me.avatar = avatar || '/avatars/default.png';
+  res.json({ success: true, avatar: me.avatar });
+});
+
+// Friends
 app.get("/friends", requireLogin, (req, res) => {
   const me = users[req.session.user.username];
-  // recent users: last 5 signed up excluding self and existing friends
+
   const recent = Object.entries(users)
     .filter(([uname]) => uname !== me.username && !me.friends.includes(uname))
-    .sort((a,b)=> b[1].createdAt - a[1].createdAt)
-    .slice(0,5)
-    .map(([uname, u]) => ({ username: uname, admin: u.admin, avatar: '/avatars/default.png' }));
+    .sort((a, b) => b[1].createdAt - a[1].createdAt)
+    .slice(0, 5)
+    .map(([uname, u]) => ({ username: uname, admin: u.admin, avatar: u.avatar }));
 
   const friendsList = me.friends.map(f => {
     const u = users[f];
-    return { username: f, admin: u.admin, avatar: '/avatars/default.png' };
+    return { username: f, admin: u.admin, avatar: u.avatar };
   });
 
   res.json({ recent, friends: friendsList, requests: me.requests });
@@ -116,43 +122,58 @@ app.post("/friend-request", requireLogin, (req, res) => {
 app.post("/accept-request", requireLogin, (req, res) => {
   const { from } = req.body;
   const me = users[req.session.user.username];
-  if (!users[from]) return res.json({ success: false, message: "User not found" });
-  if (!me.requests.includes(from)) return res.json({ success: false, message: "No request found" });
+  if (!me.requests.includes(from)) return res.json({ success: false, message: "Request not found" });
 
   me.requests = me.requests.filter(r => r !== from);
-  me.friends.push(from);
-  users[from].friends.push(me.username);
+  if (!me.friends.includes(from)) me.friends.push(from);
+  if (!users[from].friends.includes(me.username)) users[from].friends.push(me.username);
 
   res.json({ success: true });
-});
-
-// Rooms
-app.post("/create-room", requireLogin, (req, res) => {
-  const { name } = req.body;
-  if (!name || !name.trim()) return res.json({ success: false, message: "Room name required" });
-  if (rooms[name]) return res.json({ success: false, message: "Room already exists" });
-
-  rooms[name] = { users: [], avatar: '/avatars/default.png' };
-  io.emit('roomCreated', { name, avatar: '/avatars/default.png' });
-  res.json({ success: true, room: rooms[name] });
-});
-
-app.get("/rooms", requireLogin, (req, res) => {
-  const allRooms = Object.entries(rooms).map(([name, data]) => ({ name, ...data }));
-  res.json({ rooms: allRooms });
 });
 
 // Messages
 app.post("/send-message", requireLogin, (req, res) => {
   const { to, room, message } = req.body;
   const from = req.session.user.username;
-  const msg = { id: Date.now().toString(), from, to: to||null, room: room||null, text: message, timestamp: Date.now() };
+  const msg = { id: Date.now().toString(), from, to: to || null, room: room || null, text: message, timestamp: Date.now() };
   messages.push(msg);
-  io.emit('message', msg);
+  io.emit("message", msg);
   res.json({ success: true });
 });
 
-// Admin routes
+// Rooms
+app.post("/create-room", requireLogin, (req, res) => {
+  const { name } = req.body;
+  const owner = req.session.user.username;
+  if (!name || !name.trim()) return res.json({ success: false, message: "Room name required" });
+  if (rooms[name]) return res.json({ success: false, message: "Room already exists" });
+
+  rooms[name] = { users: [], owner, avatar: '/avatars/default.png' };
+  io.emit("roomCreated", { name, avatar: '/avatars/default.png', owner });
+  res.json({ success: true, room: rooms[name] });
+});
+
+app.get("/rooms", requireLogin, (req, res) => {
+  const currentUser = req.session.user.username;
+  const allRooms = Object.entries(rooms).map(([name, data]) => ({
+    name,
+    avatar: data.avatar,
+    owner: data.owner,
+    isOwner: data.owner === currentUser
+  }));
+  res.json({ rooms: allRooms });
+});
+
+app.post("/join-room", requireLogin, (req, res) => {
+  const { name } = req.body;
+  const user = req.session.user.username;
+  const room = rooms[name];
+  if (!room) return res.json({ success: false, message: "Room not found" });
+  if (!room.users.includes(user)) room.users.push(user);
+  res.json({ success: true, room });
+});
+
+// Admin
 app.get("/admin/users", requireAdmin, (req, res) => res.json({ success: true, users }));
 app.post("/admin/ban", requireAdmin, (req, res) => {
   const { username } = req.body;
@@ -168,8 +189,10 @@ app.post("/admin/delete-message", requireAdmin, (req, res) => {
 });
 
 // Socket.io
-io.on("connection", socket => {
-  socket.on("registerUser", username => { socket.username = username; });
+io.on("connection", (socket) => {
+  socket.on("registerUser", (username) => {
+    socket.username = username;
+  });
 });
 
 server.listen(PORT, () => console.log("Server running on port " + PORT));
