@@ -238,6 +238,28 @@ main{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:6px 18px 24px
       roomsListDiv.appendChild(el);
     });
   }
+// --- Create Room Button Handler ---
+const createRoomBtn = document.getElementById('createRoomBtn');
+const roomNameInput = document.getElementById('roomName');
+
+createRoomBtn.onclick = async () => {
+  const name = roomNameInput.value.trim();
+  if (!name) return alert('Enter a room name');
+
+  const res = await fetch('/create-room', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  });
+
+  const j = await res.json();
+  if (j.success) {
+    roomNameInput.value = '';
+    await loadRooms(); // refresh the rooms list
+  } else {
+    alert(j.message || 'Failed to create room');
+  }
+};
 
   async function loadDMList(){
     const data = await api('/friends');
