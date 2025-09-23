@@ -183,6 +183,54 @@ app.post("/create-room", requireLogin, (req, res) => {
     saveRooms();
     res.json({ success: true });
 });
+// Messages
+app.post("/send-message", requireLogin, (req, res) => {
+    const from = req.session.user.username;
+    const { to, room, message } = req.body;
+    if (!message) return res.json({ success: false });
+
+    const msg = {
+        id: Date.now().toString(),
+        from,
+        fromAvatar: users[from].avatar, // attach sender pfp
+        to: to || null,
+        room: room || null,
+        text: message,
+        timestamp: Date.now(),
+    };
+
+    messages.push(msg);
+    saveMessages();
+
+    // Emit to everyone in the room, or to a single user
+    if (room) {
+        // Room message
+        io.to(room).emit("message", msg);
+    } else if (to) {
+        // DM
+        // Find sockets of sender and receiver
+        for (let [id, s] of io.of("/").sockets) {
+            if (s.username === to || s.username === from) s.emit("message", msg);
+        }
+    } else {
+        // Global broadcast (optional)
+        io.emit("message", msg);
+    }
+
+    res.json({ success: true });
+});
+
+// Socket.io room join
+io.on("connection", socket => {
+    socket.on("registerUser", username => {
+        socket.username = username;
+    });
+
+    socket.on("joinRoom", room => {
+        if (!rooms[room]) return;
+        socket.join(room);
+    });
+});
 
 app.get("/rooms", requireLogin, (req, res) => {
     const roomList = Object.keys(rooms).map(r => ({
