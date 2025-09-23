@@ -1,45 +1,39 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-<meta charset="utf-8">
-<title>Login - Epick Chat</title>
-<style>
-  body{font-family:Arial;background:#0f1114;color:#e8eefc;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}
-  .box{background:rgba(255,255,255,0.03);padding:20px;border-radius:8px;width:320px;}
-  input{width:100%;padding:10px;margin:8px 0;border-radius:6px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:#fff;}
-  button{width:100%;padding:10px;border-radius:6px;background:#6b8cff;border:none;color:#05102a;cursor:pointer;}
-  .muted{color:#aab4d6;font-size:13px;text-align:center;margin-top:8px}
-</style>
+    <meta charset="UTF-8">
+    <title>Epick Chat Update</title>
+    <style>
+        body {
+            background: #222;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 50px;
+        }
+        h1 {
+            margin-bottom: 30px;
+        }
+        .nyan-container img {
+            max-width: 300px;
+            margin: 15px;
+            border-radius: 10px;
+            box-shadow: 0 0 15px rgba(255,255,255,0.3);
+            transition: transform 0.3s;
+        }
+        .nyan-container img:hover {
+            transform: scale(1.1);
+        }
+    </style>
 </head>
 <body>
-  <div class="box">
-    <h3 style="margin:0 0 8px 0">Epick Chat</h3>
-    <input id="username" placeholder="username">
-    <input id="password" placeholder="password" type="password">
-    <button id="loginBtn">Login</button>
-    <button id="signupBtn" style="margin-top:8px;background:transparent;border:1px solid rgba(255,255,255,0.06);color:#fff">Sign up</button>
-  </div>
-
-<script>
-document.getElementById('loginBtn').onclick = async () => {
-  const u = document.getElementById('username').value.trim();
-  const p = document.getElementById('password').value;
-  if(!u||!p) return alert('fill both');
-  const res = await fetch('/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ username: u, password: p })});
-  const j = await res.json();
-  if(j.success) location.href = '/';
-  else alert(j.message || 'Login failed');
-};
-document.getElementById('signupBtn').onclick = async () => {
-  const u = prompt('Choose a username');
-  if(!u) return;
-  const p = prompt('Choose a password');
-  if(!p) return;
-  const res = await fetch('/signup', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ username: u, password: p })});
-  const j = await res.json();
-  if(j.success) location.href = '/';
-  else alert(j.message || 'Signup failed');
-};
-</script>
+    <h1>Hey, so Epick Chat is undergoing changes right now that I cannot fix tonight. Many errors with the system that I have yet to fix. For now, have this Nyan Cat!</h1>
+    
+    <div class="nyan-container">
+        <img src="https://media.tenor.com/2roX3uxz_68AAAAM/cat-space.gif" alt="Nyan Cat 1">
+        <img src="https://media.tenor.com/0jI-YXeywSsAAAAM/nyan-cat-cat.gif" alt="Nyan Cat 2">
+        <img src="data:image/png;base64,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" alt="Nyan Cat 3">
+        <img src="https://i.makeagif.com/media/6-04-2015/7zgvqL.gif" alt="Nyan Cat 4">
+    </div>
 </body>
 </html>
